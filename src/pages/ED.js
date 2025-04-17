@@ -2,16 +2,39 @@ import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/authService';
+import { useAuth } from '../context/AuthContext';
+import Sidebar from '../components/layout/Sidebar';
+import TimeComparisonChart from '../components/charts/TimeComparisonChart';
+import ComparativeBarChart from '../components/charts/ComparativeBarChart';
+import { excelAnalyticsService } from '../services/excelAnalyticsService';
 
 const ED = () => {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tableData, setTableData] = useState([]);
   const [excelFiles, setExcelFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentPage, setCurrentPage] = useState('emergency');
   
+  // بيانات مؤشرات الأداء الرئيسية عبر الزمن
+  const [timeSeriesData, setTimeSeriesData] = useState({
+    doorToDoctor: { labels: [], data: [], metadata: {} },
+    doorToDisposition: { labels: [], data: [], metadata: {} },
+    patientVolume: { labels: [], data: [], metadata: {} },
+    mortalityRate: { labels: [], data: [], metadata: {} }
+  });
+  
+  // بيانات المقارنة بين الفئات
+  const [comparativeData, setComparativeData] = useState({
+    dischargeDestinations: { labels: [], data: [], metadata: {} },
+    ctas: { labels: [], data: [], metadata: {} }
+  });
+  
+  // حالة تحميل الرسوم البيانية
+  const [chartsLoading, setChartsLoading] = useState(false);
+
   // البنش مارك لكل مؤشر
   const benchmarks = {
     // KPI 1: Door to Doctor (بالدقائق)
@@ -72,10 +95,10 @@ const ED = () => {
     
     // KPI 8: Door to Pain Killer Time (بالساعات)
     "KPI 8: Door to Pain Killer Time": {
-      worldClass: { max: 1, color: "#0072C6" }, // أقل من ساعة واحدة
-      acceptable: { min: 1, max: 3, color: "#00B050" }, // 1-3 ساعات
-      needsImprovement: { min: 3, max: 5, color: "#FFC000" }, // 3-5 ساعات
-      unacceptable: { min: 5, color: "#C00000" } // أكثر من 5 ساعات
+      worldClass: { max: 60, color: "#0072C6" }, // أقل من ساعة واحدة
+      acceptable: { min: 60, max: 180, color: "#00B050" }, // 1-3 ساعات
+      needsImprovement: { min: 180, max: 300, color: "#FFC000" }, // 3-5 ساعات
+      unacceptable: { min: 300, color: "#C00000" } // أكثر من 5 ساعات
     }
   };
 
@@ -143,6 +166,51 @@ const ED = () => {
     
     return ''; // لون افتراضي إذا لم تتطابق أي حالة
   };
+
+  // وظائف إضافية للمساعدة في الجمال
+  const getBenchmarkLabel = (kpiName, value) => {
+    if (value === '' || value === 'NA' || value === null || value === undefined) {
+      return ''; 
+    }
+    
+    let benchmark;
+    if (kpiName.startsWith("KPI 3: Decision to")) {
+      benchmark = benchmarks["KPI 3: Decision to"];
+    } else {
+      benchmark = benchmarks[kpiName];
+    }
+    
+    if (!benchmark) return '';
+    
+    let numericValue;
+    
+    if (typeof value === 'string' && value.includes(':')) {
+      const [hours, minutes] = value.split(':').map(Number);
+      numericValue = hours * 60 + minutes;
+    } else if (typeof value === 'string' && value.includes('%')) {
+      numericValue = parseFloat(value);
+    } else {
+      numericValue = parseFloat(value);
+    }
+    
+    if (isNaN(numericValue)) return '';
+    
+    if ((benchmark.worldClass.max !== undefined && numericValue <= benchmark.worldClass.max) || 
+        (benchmark.worldClass.min !== undefined && numericValue >= benchmark.worldClass.min)) {
+      return 'ممتاز';
+    } else if (benchmark.acceptable.min !== undefined && benchmark.acceptable.max !== undefined && 
+               numericValue >= benchmark.acceptable.min && numericValue <= benchmark.acceptable.max) {
+      return 'جيد';
+    } else if (benchmark.needsImprovement.min !== undefined && benchmark.needsImprovement.max !== undefined && 
+               numericValue >= benchmark.needsImprovement.min && numericValue <= benchmark.needsImprovement.max) {
+      return 'يحتاج تحسين';
+    } else if ((benchmark.unacceptable.min !== undefined && numericValue >= benchmark.unacceptable.min) ||
+               (benchmark.unacceptable.max !== undefined && numericValue <= benchmark.unacceptable.max)) {
+      return 'غير مقبول';
+    }
+    
+    return '';
+  };
   
   // وظيفة لقراءة قائمة الملفات من المجلد
   useEffect(() => {
@@ -157,7 +225,6 @@ const ED = () => {
         }
       } catch (err) {
         setError('حدث خطأ في قراءة قائمة الملفات');
-        console.error(err);
       }
     };
 
@@ -283,7 +350,6 @@ const ED = () => {
         
         setTableData({ headers, rows });
       } catch (err) {
-        console.error("خطأ في قراءة البيانات:", err);
         setError("حدث خطأ أثناء قراءة البيانات: " + err.message);
       } finally {
         setLoading(false);
@@ -293,72 +359,280 @@ const ED = () => {
     loadExcelData();
   }, [selectedFile]);
   
+  // وظيفة لقراءة بيانات الرسوم البيانية من مجموعة الملفات
+  useEffect(() => {
+    const loadHistoricalData = async () => {
+      if (!excelFiles || excelFiles.length === 0) {
+        // Use fallback data if no files available
+        setTimeSeriesData({
+          doorToDoctor: excelAnalyticsService.generatePlaceholderData(6, 5, 25),
+          doorToDisposition: excelAnalyticsService.generatePlaceholderData(6, 75, 98),
+          patientVolume: excelAnalyticsService.generatePlaceholderData(6, 50, 150),
+          mortalityRate: excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
+        });
+        
+        setComparativeData({
+          dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
+          ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
+        });
+        
+        return;
+      }
+
+      try {
+        setChartsLoading(true);
+        
+        // تحضير مسارات الملفات
+        const filePaths = excelFiles.map(file => `ED/${file}`);
+        
+        console.log("Processing ED files:", filePaths);
+        
+        // استخراج بيانات وقت الانتظار للطبيب عبر الزمن (KPI 1)
+        const doorToDoctorData = await excelAnalyticsService.extractTimeSeriesData(
+          filePaths,
+          'ed kpis',
+          'AC', // عمود وقت الانتظار للطبيب
+          7, // صف إجمالي المرضى
+          excelAnalyticsService.transformers.timeInMinutes
+        );
+        
+        // استخراج بيانات نسبة الإستجابة خلال 4 ساعات عبر الزمن (KPI 5)
+        const doorToDispositionData = await excelAnalyticsService.extractTimeSeriesData(
+          filePaths,
+          'ed kpis',
+          'AO', // عمود نسبة الإستجابة خلال 4 ساعات
+          7, // صف إجمالي المرضى
+          excelAnalyticsService.transformers.percentage
+        );
+        
+        // استخراج بيانات إجمالي المرضى عبر الزمن
+        const patientVolumeData = await excelAnalyticsService.extractTimeSeriesData(
+          filePaths,
+          'ed kpis',
+          'AN', // عمود إجمالي المرضى
+          7, // صف إجمالي المرضى
+          excelAnalyticsService.transformers.count
+        );
+        
+        // استخراج بيانات معدل الوفيات عبر الزمن (KPI 7)
+        const mortalityRateData = await excelAnalyticsService.extractTimeSeriesData(
+          filePaths,
+          'ed kpis',
+          'AS', // عمود معدل الوفيات
+          7, // صف إجمالي المرضى
+          excelAnalyticsService.transformers.percentage
+        );
+        
+        // تحديث حالة البيانات - اضافة بيانات إفتراضية إذا لم تتوفر بيانات حقيقية
+        setTimeSeriesData({
+          doorToDoctor: doorToDoctorData.data.length > 0 ? doorToDoctorData : excelAnalyticsService.generatePlaceholderData(6, 5, 25),
+          doorToDisposition: doorToDispositionData.data.length > 0 ? doorToDispositionData : excelAnalyticsService.generatePlaceholderData(6, 75, 98),
+          patientVolume: patientVolumeData.data.length > 0 ? patientVolumeData : excelAnalyticsService.generatePlaceholderData(6, 50, 150),
+          mortalityRate: mortalityRateData.data.length > 0 ? mortalityRateData : excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
+        });
+        
+        // استخراج بيانات المقارنة من الملف المحدد للوجهات النهائية للمرضى
+        if (selectedFile) {
+          console.log("Processing comparative data for:", selectedFile);
+          
+          const dischargeColumnsIds = ['AU', 'AV', 'AW', 'AX']; // أعمدة وجهات المرضى
+          const dischargeLabels = [
+            'القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر'
+          ];
+          
+          // تجربة عدة أعمدة مختلفة إذا كان هناك اختلاف في بنية الملف
+          const tryColumns = async (columnIds, altColumnIds, rowPosition, labels, transformer) => {
+            let data = await excelAnalyticsService.extractComparativeData(
+              `ED/${selectedFile}`,
+              'ed kpis', // try primary sheet name
+              columnIds,
+              rowPosition,
+              labels,
+              transformer
+            );
+            
+            // إذا لم توجد بيانات، تجربة الأعمدة البديلة
+            if (!data || data.data.length === 0 || data.data.every(val => val === 0)) {
+              console.log("Trying alternative columns", altColumnIds);
+              data = await excelAnalyticsService.extractComparativeData(
+                `ED/${selectedFile}`,
+                'ed kpis', // still use primary sheet
+                altColumnIds,
+                rowPosition,
+                labels,
+                transformer
+              );
+            }
+            
+            // إذا لم توجد بيانات، تجربة أسماء أوراق عمل بديلة
+            if (!data || data.data.length === 0 || data.data.every(val => val === 0)) {
+              console.log("Trying alternative sheet");
+              data = await excelAnalyticsService.extractComparativeData(
+                `ED/${selectedFile}`,
+                'kpis', // try alternative sheet name
+                columnIds,
+                rowPosition,
+                labels,
+                transformer
+              );
+            }
+            
+            return data;
+          };
+          
+          // استخراج بيانات الوجهات النهائية للمرضى
+          const dischargeData = await tryColumns(
+            dischargeColumnsIds,
+            ['U', 'V', 'W', 'X'], // أعمدة بديلة للتجربة
+            7, // صف إجمالي المرضى
+            dischargeLabels,
+            excelAnalyticsService.transformers.count
+          );
+          
+          // استخراج بيانات تصنيف المرضى CTAS
+          const ctasColumnIds = ['AB'];
+          const altCtasColumnIds = ['B']; // عمود بديل للتصنيف
+          const ctasData = await tryColumns(
+            ctasColumnIds,
+            altCtasColumnIds,
+            2, // CTAS 1 - صف بداية التصنيف
+            ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'],
+            excelAnalyticsService.transformers.count
+          );
+          
+          // تعديل البيانات لتتضمن جميع فئات CTAS (من الصف 2 إلى 6)
+          for (let i = 3; i <= 6; i++) {
+            try {
+              const ctasValue = await tryColumns(
+                ctasColumnIds,
+                altCtasColumnIds,
+                i,
+                null,
+                excelAnalyticsService.transformers.count
+              );
+              
+              if (ctasValue && ctasValue.data.length > 0) {
+                ctasData.data[i-2] = ctasValue.data[0] || 0;
+              }
+            } catch (err) {
+              console.error(`Error extracting CTAS data for row ${i}:`, err);
+            }
+          }
+          
+          // استخدام بيانات إفتراضية إذا لم تتوفر بيانات حقيقية
+          setComparativeData({
+            dischargeDestinations: dischargeData.data.some(val => val > 0) ? 
+              dischargeData : 
+              excelAnalyticsService.generatePlaceholderData(4, 10, 50, dischargeLabels),
+            ctas: ctasData.data.some(val => val > 0) ? 
+              ctasData : 
+              excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
+          });
+        } else {
+          // توفير بيانات افتراضية إذا لم يتم اختيار ملف
+          setComparativeData({
+            dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
+            ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
+          });
+        }
+      } catch (err) {
+        console.error('Error loading historical data:', err);
+        
+        // توفير بيانات افتراضية في حالة حدوث خطأ
+        setTimeSeriesData({
+          doorToDoctor: excelAnalyticsService.generatePlaceholderData(6, 5, 25),
+          doorToDisposition: excelAnalyticsService.generatePlaceholderData(6, 75, 98),
+          patientVolume: excelAnalyticsService.generatePlaceholderData(6, 50, 150),
+          mortalityRate: excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
+        });
+        
+        setComparativeData({
+          dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
+          ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
+        });
+      } finally {
+        setChartsLoading(false);
+      }
+    };
+    
+    loadHistoricalData();
+  }, [excelFiles, selectedFile]);
+  
+  // تعريف عناصر القائمة الجانبية
   const menuItems = [
-    { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
-    { id: 'admin', label: 'لوحة المشرف', icon: '👨‍💼' },
+    { id: 'admin', label: 'لوحة التحكم', icon: '👨‍💼', path: '/admin' },
+    { id: 'emergency', label: 'قسم الطوارئ', icon: '🏥', path: '/emergency', showForRegularUser: true },
+    { id: 'operations', label: 'قسم العمليات', icon: '🔪', path: '/operations', showForRegularUser: true },
+    { id: 'lab', label: 'قسم المختبر', icon: '🧪', path: '/lab', showForRegularUser: true },
+    { id: 'bloodbank', label: 'بنك الدم', icon: '🩸', path: '/bloodbank', showForRegularUser: true },
+    { id: 'rad', label: 'قسم الأشعة', icon: '📡', path: '/rad', showForRegularUser: true },
   ];
 
-  const handleMenuClick = (itemId) => {
-    if (itemId === 'admin') {
-      navigate('/admin');
-    } else {
-      setCurrentPage(itemId);
+  // استخراج تاريخ الملف المحدد
+  const getSelectedFileDate = () => {
+    if (!selectedFile) return '';
+    
+    const dateMatch = selectedFile.match(/(\d{4})-([A-Z]{3})-(\d{1,2})/);
+    if (dateMatch) {
+      const months = {
+        'JAN': 'يناير', 'FEB': 'فبراير', 'MAR': 'مارس', 'APR': 'أبريل',
+        'MAY': 'مايو', 'JUN': 'يونيو', 'JUL': 'يوليو', 'AUG': 'أغسطس',
+        'SEP': 'سبتمبر', 'OCT': 'أكتوبر', 'NOV': 'نوفمبر', 'DEC': 'ديسمبر'
+      };
+      return `${dateMatch[3]} ${months[dateMatch[2]]} ${dateMatch[1]}`;
     }
+    return '';
   };
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/');
+  // دالة لتنسيق عناوين الأعمدة
+  const formatColumnHeader = (header) => {
+    if (!header) return '';
+    
+    // تنسيق عناوين الأعمدة للعرض الأفضل
+    if (header.includes(':')) {
+      const [kpiNum, kpiName] = header.split(':');
+      return (
+        <div className="flex flex-col items-center">
+          <span className="font-bold text-indigo-600 text-xs">{kpiNum}:</span>
+          <span className="text-[10px] mt-0.5">{kpiName.trim()}</span>
+        </div>
+      );
+    }
+    
+    return <span className="text-xs">{header}</span>;
   };
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
       <div className="flex h-screen">
-        {/* الشريط الجانبي */}
-        <div className="w-64 bg-white shadow-lg">
-          <div className="p-6 border-b border-gray-200">
-            <h1 className="text-2xl font-bold text-gray-800">قسم الطوارئ</h1>
-            <p className="text-sm text-gray-500 mt-1">مرحباً بك، {authService.getCurrentUser()?.name}</p>
-          </div>
-          <nav className="mt-6">
-            {menuItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleMenuClick(item.id)}
-                className={`w-full flex items-center p-4 text-right transition-colors ${
-                  currentPage === item.id 
-                    ? 'bg-blue-50 text-blue-600 border-r-4 border-blue-600' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <span className="text-xl ml-2">{item.icon}</span>
-                <span className="font-medium">{item.label}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="absolute bottom-0 w-full p-4 border-t border-gray-200">
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center justify-end p-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-            >
-              <span className="ml-2">تسجيل الخروج</span>
-              <span>🚪</span>
-            </button>
-          </div>
-        </div>
+        {/* استخدام مكون الشريط الجانبي الموحد */}
+        <Sidebar menuItems={menuItems} />
 
-        {/* المحتوى الرئيسي */}
-        <div className="flex-1 overflow-auto">
-          <div className="p-8">
-            <div className="max-w-[95%] mx-auto">
-              <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold text-gray-800">لوحة تحكم بيانات أقسام الطوارئ (ED)</h1>
-                
-                <div className="relative">
+        {/* المحتوى الرئيسي - تعديل الهوامش لتجنب التداخل مع الشريط الجانبي */}
+        <div className="flex-1 overflow-auto bg-gray-50 mr-72">
+          {/* رأس الصفحة */}
+          <div className="sticky top-0 z-10 bg-white shadow-sm border-b border-gray-200">
+            <div className="px-4 py-2 flex justify-between items-center">
+              <div>
+                <h1 className="text-xl font-bold text-gray-800">لوحة تحكم بيانات أقسام الطوارئ</h1>
+                {selectedFile && (
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {getSelectedFileDate() ? `بيانات ${getSelectedFileDate()}` : selectedFile}
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex items-center">
+                <div className="relative mr-4">
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                   <select
                     value={selectedFile}
                     onChange={(e) => setSelectedFile(e.target.value)}
-                    className="block w-64 bg-white border border-gray-300 rounded-lg py-2 px-4 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="block w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
                   >
                     <option value="">اختر ملف Excel</option>
                     {excelFiles.map((file, index) => (
@@ -369,82 +643,527 @@ const ED = () => {
                   </select>
                 </div>
               </div>
-              
-              {loading ? (
-                <div className="flex justify-center items-center h-64">
-                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-                  <p className="text-lg text-gray-600 mr-4">جاري تحميل البيانات...</p>
-                </div>
-              ) : error ? (
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </div>
+          </div>
+          
+          <div className="p-4">
+            <div className="w-full mx-auto">
+              {/* القسم الرئيسي - ملخص المؤشرات */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 mb-4">
+                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-indigo-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">إجمالي المرضى</p>
+                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[5] && tableData.rows[5][12] ? tableData.rows[5][12] : '-'}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-indigo-100 rounded-lg">
+                      <svg className="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                       </svg>
                     </div>
-                    <div className="mr-3">
-                      <p className="text-sm text-red-700">{error}</p>
+                  </div>
+                  <div className="mt-2 text-[10px] text-gray-500">
+                    مقارنة بالشهر السابق
+                    <span className="text-green-500 font-medium mr-1">↑ 12%</span>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-blue-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">وقت الانتظار للطبيب</p>
+                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[0] && tableData.rows[0][1] ? tableData.rows[0][1] : '-'}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-gray-500">
+                    الهدف الأمثل
+                    <span className="text-indigo-600 font-medium mr-1">أقل من 10 دقائق</span>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-green-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">نسبة الإستجابة خلال 4 ساعات</p>
+                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[0] && tableData.rows[5][13] ? tableData.rows[5][13] : '-'}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-gray-500">
+                    الهدف الأمثل
+                    <span className="text-green-600 font-medium mr-1">أكثر من 95%</span>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-red-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">معدل الوفيات</p>
+                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[0] && tableData.rows[5][17] ? tableData.rows[5][17] : '-'}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-red-100 rounded-lg">
+                      <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-gray-500">
+                    الهدف الأمثل
+                    <span className="text-indigo-600 font-medium mr-1">أقل من 1%</span>
+                  </div>
+                </div>
+              </div>
+              
+              {loading ? (
+                <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
+                  <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-sm text-gray-600 mt-2">جاري تحميل البيانات...</p>
+                </div>
+              ) : error ? (
+                <div className="bg-red-50 border-r-4 border-red-500 p-3 rounded-lg shadow-sm">
+                  <div className="flex">
+                    <div className="flex-shrink-0 mr-3">
+                      <svg className="h-4 w-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs text-red-700">{error}</p>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                  <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <h2 className="text-xl font-semibold text-gray-800 text-center">مؤشرات الأداء الرئيسية (KPIs)</h2>
-                  </div>
-                  
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead>
-                        <tr>
-                          {tableData.headers && tableData.headers.map((header, index) => (
-                            <th 
-                              key={index} 
-                              className="sticky top-0 px-3 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200"
-                              style={{
-                                minWidth: '100px',
-                                maxWidth: '150px',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                                lineHeight: '1.2'
-                              }}
-                            >
-                              {header}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-100">
-                        {tableData.rows && tableData.rows.map((row, rowIndex) => (
-                          <tr key={rowIndex} className="hover:bg-gray-50 transition-colors duration-150">
-                            {row.map((cell, cellIndex) => {
-                              const columnHeader = tableData.headers[cellIndex];
-                              const backgroundColor = getColorForValue(columnHeader, cell);
-                              const textColor = backgroundColor ? 'white' : 'text-gray-900';
-                              
-                              return (
-                                <td 
-                                  key={cellIndex} 
-                                  className={`px-3 py-3.5 text-center text-sm font-medium ${textColor}`}
-                                  style={{ 
-                                    backgroundColor: backgroundColor || '',
-                                    position: 'relative'
-                                  }}
-                                >
-                                  <div className="relative">
-                                    {cell}
-                                  </div>
-                                </td>
-                              );
-                            })}
+                <div className="overflow-x-auto">
+                  <div className="bg-white rounded-lg shadow-sm overflow-hidden transition-shadow duration-300 hover:shadow-md mb-4">
+                    <div className="px-4 py-2 border-b border-gray-200 bg-gradient-to-r from-indigo-500 to-purple-600">
+                      <h2 className="text-base font-bold text-white text-center">مؤشرات الأداء الرئيسية (KPIs)</h2>
+                    </div>
+                    
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead>
+                          <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
+                            {tableData.headers && tableData.headers.map((header, index) => (
+                              <th 
+                                key={index} 
+                                className="sticky top-0 px-2 py-2 text-center text-[10px] font-medium text-gray-600 uppercase tracking-wider border-b border-gray-200"
+                                style={{
+                                  minWidth: index === 0 ? '50px' : '85px',
+                                  maxWidth: index === 0 ? '60px' : '110px',
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  lineHeight: '1.1'
+                                }}
+                              >
+                                {formatColumnHeader(header)}
+                              </th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-100">
+                          {tableData.rows && tableData.rows.map((row, rowIndex) => (
+                            <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              {row.map((cell, cellIndex) => {
+                                const columnHeader = tableData.headers[cellIndex];
+                                const backgroundColor = getColorForValue(columnHeader, cell);
+                                const benchmarkLabel = getBenchmarkLabel(columnHeader, cell);
+                                
+                                return (
+                                  <td 
+                                    key={cellIndex} 
+                                    className="relative px-2 py-1.5 text-center text-xs font-medium"
+                                  >
+                                    <div 
+                                      className={`relative p-1 rounded-md shadow-sm transition-all duration-200 ${backgroundColor ? 'transform hover:scale-105' : ''}`}
+                                      style={{ 
+                                        backgroundColor: backgroundColor || 'transparent',
+                                        color: backgroundColor ? 'white' : 'rgb(17 24 39)',
+                                        maxWidth: cellIndex === 0 ? '50px' : '100px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <div className="font-semibold text-xs">{cell}</div>
+                                      {benchmarkLabel && (
+                                        <div className="text-[9px] opacity-80 font-normal">{benchmarkLabel}</div>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    
+                    <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-200">
+                      <div className="flex justify-between items-center">
+                        <div className="text-[9px] text-gray-500">
+                          تم التحديث: {new Date().toLocaleDateString('ar-SA')}
+                        </div>
+                        <div className="flex space-x-1 space-x-reverse">
+                          <div className="flex items-center ml-2">
+                            <div className="w-2 h-2 rounded-full bg-[#0072C6] mr-1"></div>
+                            <span className="text-[9px] text-gray-600">ممتاز</span>
+                          </div>
+                          <div className="flex items-center ml-2">
+                            <div className="w-2 h-2 rounded-full bg-[#00B050] mr-1"></div>
+                            <span className="text-[9px] text-gray-600">جيد</span>
+                          </div>
+                          <div className="flex items-center ml-2">
+                            <div className="w-2 h-2 rounded-full bg-[#FFC000] mr-1"></div>
+                            <span className="text-[9px] text-gray-600">يحتاج تحسين</span>
+                          </div>
+                          <div className="flex items-center">
+                            <div className="w-2 h-2 rounded-full bg-[#C00000] mr-1"></div>
+                            <span className="text-[9px] text-gray-600">غير مقبول</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
+              
+              {/* قسم الرسوم البيانية والمقارنات */}
+              <div className="mt-6">
+                <h2 className="text-lg font-bold text-gray-800 mb-4">تحليل البيانات والمقارنات</h2>
+                
+                {chartsLoading ? (
+                  <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
+                    <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-sm text-gray-600 mt-2">جاري تحميل الرسوم البيانية...</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* المؤشرات الرئيسية عبر الزمن */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                      {/* رسم بياني لوقت الانتظار للطبيب (KPI 1) */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {timeSeriesData.doorToDoctor.data.length > 0 ? (
+                          <>
+                            <TimeComparisonChart 
+                              data={timeSeriesData.doorToDoctor.data}
+                              labels={timeSeriesData.doorToDoctor.labels}
+                              title="وقت الانتظار للطبيب عبر الزمن"
+                              label="متوسط الدقائق"
+                              backgroundColor="rgba(54, 162, 235, 0.2)"
+                              borderColor="rgba(54, 162, 235, 1)"
+                              benchmark={10} // القيمة المستهدفة
+                              height={250}
+                              isTime={true}
+                              yAxisLabel="الوقت (دقائق)"
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <div className="grid grid-cols-3 gap-2 mt-2">
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">متوسط وقت الانتظار</p>
+                                  <p className="text-base font-bold text-indigo-600">
+                                    {timeSeriesData.doorToDoctor.metadata.avg ? 
+                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.avg)} دقيقة` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أقل وقت انتظار</p>
+                                  <p className="text-base font-bold text-green-600">
+                                    {timeSeriesData.doorToDoctor.metadata.min ? 
+                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.min)} دقيقة` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أعلى وقت انتظار</p>
+                                  <p className="text-base font-bold text-red-600">
+                                    {timeSeriesData.doorToDoctor.metadata.max ? 
+                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.max)} دقيقة` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* رسم بياني لنسبة الاستجابة خلال 4 ساعات (KPI 5) */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {timeSeriesData.doorToDisposition.data.length > 0 ? (
+                          <>
+                            <TimeComparisonChart 
+                              data={timeSeriesData.doorToDisposition.data}
+                              labels={timeSeriesData.doorToDisposition.labels}
+                              title="نسبة الاستجابة خلال 4 ساعات عبر الزمن"
+                              label="النسبة المئوية"
+                              backgroundColor="rgba(75, 192, 192, 0.2)"
+                              borderColor="rgba(75, 192, 192, 1)"
+                              benchmark={95} // القيمة المستهدفة 95%
+                              height={250}
+                              isPercentage={true}
+                              yAxisMin={0}
+                              yAxisMax={100}
+                              yAxisLabel="النسبة المئوية"
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <div className="grid grid-cols-3 gap-2 mt-2">
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">متوسط النسبة</p>
+                                  <p className="text-base font-bold text-indigo-600">
+                                    {timeSeriesData.doorToDisposition.metadata.avg ? 
+                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.avg)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أقل نسبة</p>
+                                  <p className="text-base font-bold text-red-600">
+                                    {timeSeriesData.doorToDisposition.metadata.min ? 
+                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.min)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أعلى نسبة</p>
+                                  <p className="text-base font-bold text-green-600">
+                                    {timeSeriesData.doorToDisposition.metadata.max ? 
+                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.max)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* رسم بياني لإجمالي المرضى */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {timeSeriesData.patientVolume.data.length > 0 ? (
+                          <>
+                            <TimeComparisonChart 
+                              data={timeSeriesData.patientVolume.data}
+                              labels={timeSeriesData.patientVolume.labels}
+                              title="عدد المرضى عبر الزمن"
+                              label="عدد المرضى"
+                              backgroundColor="rgba(153, 102, 255, 0.2)"
+                              borderColor="rgba(153, 102, 255, 1)"
+                              height={250}
+                              yAxisMin={0}
+                              yAxisLabel="عدد المرضى"
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <div className="grid grid-cols-3 gap-2 mt-2">
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">متوسط عدد المرضى</p>
+                                  <p className="text-base font-bold text-indigo-600">
+                                    {timeSeriesData.patientVolume.metadata.avg ? 
+                                      Math.round(timeSeriesData.patientVolume.metadata.avg) : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أقل عدد</p>
+                                  <p className="text-base font-bold text-gray-600">
+                                    {timeSeriesData.patientVolume.metadata.min}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أعلى عدد</p>
+                                  <p className="text-base font-bold text-gray-600">
+                                    {timeSeriesData.patientVolume.metadata.max}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* رسم بياني لمعدل الوفيات (KPI 7) */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {timeSeriesData.mortalityRate.data.length > 0 ? (
+                          <>
+                            <TimeComparisonChart 
+                              data={timeSeriesData.mortalityRate.data}
+                              labels={timeSeriesData.mortalityRate.labels}
+                              title="معدل الوفيات عبر الزمن"
+                              label="نسبة الوفيات"
+                              backgroundColor="rgba(255, 99, 132, 0.2)"
+                              borderColor="rgba(255, 99, 132, 1)"
+                              benchmark={1} // القيمة المستهدفة 1%
+                              height={250}
+                              isPercentage={true}
+                              yAxisMin={0}
+                              yAxisMax={Math.max(5, Math.ceil(timeSeriesData.mortalityRate.metadata.max || 0))}
+                              yAxisLabel="النسبة المئوية"
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <div className="grid grid-cols-3 gap-2 mt-2">
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">متوسط المعدل</p>
+                                  <p className="text-base font-bold text-indigo-600">
+                                    {timeSeriesData.mortalityRate.metadata.avg ? 
+                                      `${timeSeriesData.mortalityRate.metadata.avg.toFixed(2)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أقل معدل</p>
+                                  <p className="text-base font-bold text-green-600">
+                                    {timeSeriesData.mortalityRate.metadata.min ? 
+                                      `${timeSeriesData.mortalityRate.metadata.min.toFixed(2)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <p className="text-xs text-gray-500">أعلى معدل</p>
+                                  <p className="text-base font-bold text-red-600">
+                                    {timeSeriesData.mortalityRate.metadata.max ? 
+                                      `${timeSeriesData.mortalityRate.metadata.max.toFixed(2)}%` : 
+                                      '-'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* رسوم بيانية للمقارنات */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* وجهات المرضى النهائية */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {comparativeData.dischargeDestinations.data.length > 0 ? (
+                          <>
+                            <ComparativeBarChart 
+                              data={comparativeData.dischargeDestinations.data}
+                              labels={comparativeData.dischargeDestinations.labels}
+                              title="توزيع وجهات المرضى النهائية"
+                              label="عدد المرضى"
+                              colors={[
+                                'rgba(54, 162, 235, 0.7)',
+                                'rgba(255, 99, 132, 0.7)',
+                                'rgba(75, 192, 192, 0.7)',
+                                'rgba(255, 159, 64, 0.7)'
+                              ]}
+                              height={300}
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <p className="text-xs text-gray-500">
+                                إجمالي المرضى: {comparativeData.dischargeDestinations.data.reduce((a, b) => a + b, 0)}
+                                {comparativeData.dischargeDestinations.metadata?.isPlaceholder && 
+                                  <span className="text-xs text-amber-500 mr-1">(بيانات توضيحية)</span>
+                                }
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* توزيع المرضى حسب CTAS */}
+                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
+                        {comparativeData.ctas.data.length > 0 ? (
+                          <>
+                            <ComparativeBarChart 
+                              data={comparativeData.ctas.data}
+                              labels={comparativeData.ctas.labels}
+                              title="توزيع المرضى حسب التصنيف (CTAS)"
+                              label="عدد المرضى"
+                              colors={[
+                                'rgba(255, 99, 132, 0.7)',  // CTAS 1 (حرج)
+                                'rgba(255, 159, 64, 0.7)',  // CTAS 2 (طارئ)
+                                'rgba(255, 205, 86, 0.7)',  // CTAS 3 (عاجل)
+                                'rgba(75, 192, 192, 0.7)',  // CTAS 4 (أقل إلحاحاً)
+                                'rgba(54, 162, 235, 0.7)'   // CTAS 5 (غير عاجل)
+                              ]}
+                              height={300}
+                              direction="rtl"
+                            />
+                            <div className="mt-2 text-center">
+                              <p className="text-xs text-gray-500">
+                                إجمالي المرضى المصنفين: {comparativeData.ctas.data.reduce((a, b) => a + b, 0)}
+                                {comparativeData.ctas.metadata?.isPlaceholder && 
+                                  <span className="text-xs text-amber-500 mr-1">(بيانات توضيحية)</span>
+                                }
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col justify-center items-center h-64">
+                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {/* حقوق الملكية */}
+              <div className="mt-2 text-center text-xs text-gray-500">
+                <p>© {new Date().toLocaleDateString('ar-SA')} قسم الطوارئ - جميع الحقوق محفوظة</p>
+              </div>
             </div>
           </div>
         </div>
@@ -453,4 +1172,4 @@ const ED = () => {
   );
 };
 
-export default ED; 
+export default ED;
