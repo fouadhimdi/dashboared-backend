@@ -1,0 +1,12 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "employeeId": "admin",
+      "name": "مدير النظام",
+      "password": "Admin1234567890",
+      "role": "admin",
+      "createdAt": "2024-03-20T12:00:00Z"
+    }
+  ]
+} 
