@@ -4,6 +4,39 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// وظيفة لاستخراج التاريخ من اسم الملف
+const extractDateFromFileName = (fileName) => {
+  const dateMatch = fileName.match(/(\d{4})-([A-Z]{3})-(\d{1,2})/);
+  if (!dateMatch) return null;
+  
+  const year = parseInt(dateMatch[1]);
+  const monthStr = dateMatch[2];
+  const day = parseInt(dateMatch[3]);
+  
+  const months = {
+    'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+    'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+    'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+  };
+  
+  const month = months[monthStr];
+  if (month === undefined) return null;
+  
+  return new Date(year, month, day);
+};
+
+// وظيفة لمقارنة التواريخ للترتيب
+const compareDates = (fileA, fileB) => {
+  const dateA = extractDateFromFileName(fileA);
+  const dateB = extractDateFromFileName(fileB);
+  
+  if (!dateA && !dateB) return 0;
+  if (!dateA) return 1;
+  if (!dateB) return -1;
+  
+  return dateA - dateB; // ترتيب تصاعدي (من الأقدم للأحدث)
+};
+
 const BB = () => {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
@@ -259,7 +292,7 @@ const BB = () => {
         if (!isMounted) return;
         
         const files = await response.json();
-        const excelFiles = files.filter(file => file.endsWith('.xlsx'));
+        const excelFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
         setExcelFiles(excelFiles);
         if (excelFiles.length > 0) {
           setSelectedFile(excelFiles[0]);

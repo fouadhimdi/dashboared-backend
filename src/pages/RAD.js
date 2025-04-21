@@ -28,6 +28,60 @@ const formatDateArabic = (date) => {
   return months[date.getMonth()];
 };
 
+// وظيفة لاستخراج التاريخ من اسم الملف
+const extractDateFromFileName = (fileName) => {
+  // التعامل مع نسق التاريخ الشهري (مثال: 2025-FEB.xlsx)
+  const monthlyDateMatch = fileName.match(/(\d{4})-([A-Z]{3})/);
+  if (monthlyDateMatch) {
+    const year = parseInt(monthlyDateMatch[1]);
+    const monthStr = monthlyDateMatch[2];
+    
+    const months = {
+      'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+      'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+      'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+    };
+    
+    const month = months[monthStr];
+    if (month !== undefined) {
+      return new Date(year, month, 1);
+    }
+  }
+  
+  // التعامل مع نسق التاريخ اليومي (مثال: 2025-FEB-15.xlsx)
+  const dailyDateMatch = fileName.match(/(\d{4})-([A-Z]{3})-(\d{1,2})/);
+  if (dailyDateMatch) {
+    const year = parseInt(dailyDateMatch[1]);
+    const monthStr = dailyDateMatch[2];
+    const day = parseInt(dailyDateMatch[3]);
+    
+    const months = {
+      'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+      'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+      'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+    };
+    
+    const month = months[monthStr];
+    if (month !== undefined) {
+      return new Date(year, month, day);
+    }
+  }
+  
+  return null;
+};
+
+// وظيفة لمقارنة التواريخ للترتيب
+const compareDates = (fileA, fileB) => {
+  const dateA = extractDateFromFileName(fileA);
+  const dateB = extractDateFromFileName(fileB);
+  
+  if (!dateA && !dateB) return 0;
+  if (!dateA) return 1;
+  if (!dateB) return -1;
+  
+  return dateA - dateB; // ترتيب تصاعدي (من الأقدم للأحدث)
+};
+
 const RAD = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -96,18 +150,28 @@ const RAD = () => {
   // وظيفة لقراءة ملفات Excel المتاحة
   const loadExcelFiles = async () => {
     try {
-      // Instead of fetching from an API endpoint, use hardcoded file list from the public directory
-      // This is a workaround for the API endpoint not working properly
-      const mockFiles = ["RAD-JD-GEN-4-2025-JAN.xlsx", "RAD-JD-GEN-4-2025-FEB.xlsx", "RAD-JD-GEN-4-2025-MAR.xlsx"];
-      setExcelFiles(mockFiles);
+      // محاولة جلب قائمة الملفات من نقطة النهاية API
+      const response = await fetch('http://localhost:3001/data/RAD');
+      const files = await response.json();
+      
+      // ترتيب الملفات حسب التاريخ من الأقدم إلى الأحدث
+      const excelFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
+      
+      setExcelFiles(excelFiles);
       
       // اختيار أحدث ملف افتراضيًا
-      if (mockFiles.length > 0) {
-        setSelectedFile(mockFiles[mockFiles.length - 1]);
-        loadExcelData(mockFiles[mockFiles.length - 1]);
+      if (excelFiles.length > 0) {
+        setSelectedFile(excelFiles[0]);
+        loadExcelData(excelFiles[0]);
       } else {
         setError('لا توجد ملفات بيانات متاحة');
         setLoading(false);
+        
+        // في حالة عدم وجود ملفات، استخدم قائمة ثابتة كبديل
+        const mockFiles = ["RAD-JD-GEN-4-2025-JAN.xlsx", "RAD-JD-GEN-4-2025-FEB.xlsx", "RAD-JD-GEN-4-2025-MAR.xlsx"].sort(compareDates);
+        setExcelFiles(mockFiles);
+        setSelectedFile(mockFiles[0]);
+        loadExcelData(mockFiles[0]);
       }
     } catch (err) {
       console.error('Error loading Excel files:', err);
@@ -115,7 +179,7 @@ const RAD = () => {
       setLoading(false);
       
       // في حالة فشل تحميل الملفات، استخدم قائمة ثابتة كبديل
-      const mockFiles = ["RAD-JD-GEN-4-2025-JAN.xlsx", "RAD-JD-GEN-4-2025-FEB.xlsx", "RAD-JD-GEN-4-2025-MAR.xlsx"];
+      const mockFiles = ["RAD-JD-GEN-4-2025-JAN.xlsx", "RAD-JD-GEN-4-2025-FEB.xlsx", "RAD-JD-GEN-4-2025-MAR.xlsx"].sort(compareDates);
       setExcelFiles(mockFiles);
       setSelectedFile(mockFiles[0]);
       loadExcelData(mockFiles[0]);
