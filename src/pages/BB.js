@@ -1,13 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
-import { excelAnalyticsService } from '../services/excelAnalyticsService';
-
-// تحميل مكونات الرسوم البيانية بشكل كسول (Lazy Loading)
-const TimeComparisonChart = lazy(() => import('../components/charts/TimeComparisonChart'));
-const ComparativeBarChart = lazy(() => import('../components/charts/ComparativeBarChart'));
 
 const BB = () => {
   const navigate = useNavigate();
@@ -18,24 +13,7 @@ const BB = () => {
   const [selectedFile, setSelectedFile] = useState('');
   const [kpis, setKpis] = useState({});
   
-  // حالة تحميل وبيانات الرسوم البيانية
-  const [chartsLoading, setChartsLoading] = useState(false);
-  const [chartsData, setChartsData] = useState({
-    timeSeriesData: {
-      crossmatchRatio: { labels: [], data: [], metadata: {} },
-      expiredUnits: { labels: [], data: [], metadata: {} },
-      volunteerDonors: { labels: [], data: [], metadata: {} },
-      femaleDonors: { labels: [], data: [], metadata: {} }
-    },
-    comparativeData: {
-      bloodTypes: { labels: [], data: [], metadata: {} },
-      donationsByMonth: { labels: [], data: [], metadata: {} },
-      donationReasons: { labels: [], data: [], metadata: {} }
-    }
-  });
-  
-  // تخزين مؤقت للرسوم البيانية لتحسين الأداء
-  const chartsDataCacheRef = useRef({});
+  // تخزين مؤقت للتحسين الأداء
   const kpiCacheRef = useRef({});
   const excelDataRef = useRef({});
 
@@ -60,7 +38,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'red',
-      exactCell: { rowIndex: 4, columnName: 'B' } // Cell B5 in Excel (row 5)
+      exactCell: { rowIndex: 4, columnName: 'B' }
     },
     {
       id: 'expiredUnits',
@@ -73,7 +51,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'yellow',
-      exactCell: { rowIndex: 4, columnName: 'D' } // Cell D5 in Excel (row 5)
+      exactCell: { rowIndex: 4, columnName: 'D' }
     },
     {
       id: 'femaleDonors',
@@ -86,7 +64,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'green',
-      exactCell: { rowIndex: 4, columnName: 'F' } // Cell F5 in Excel (row 5)
+      exactCell: { rowIndex: 4, columnName: 'F' }
     },
     {
       id: 'adverseEvents',
@@ -99,7 +77,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'purple',
-      exactCell: { rowIndex: 4, columnName: 'H' } // Cell H5 in Excel (row 5)
+      exactCell: { rowIndex: 4, columnName: 'H' }
     },
     {
       id: 'volunteerDonors',
@@ -112,7 +90,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'blue',
-      exactCell: { rowIndex: 4, columnName: 'J' } // Cell J5 in Excel (row 5)
+      exactCell: { rowIndex: 4, columnName: 'J' }
     },
     {
       id: 'discardedUnits',
@@ -125,7 +103,7 @@ const BB = () => {
         </svg>
       ),
       borderColor: 'red',
-      exactCell: { rowIndex: 19, columnName: 'O' } // تعديل إلى العمود O والصف 20 (Total: 5%)
+      exactCell: { rowIndex: 19, columnName: 'O' }
     }
   ]);
   
@@ -194,7 +172,6 @@ const BB = () => {
   
   // دالة لاستخراج القيمة من الخلية بناءً على اسم العمود
   const getValueByColumnName = (sheet, rowIndex, columnName) => {
-    // تحويل العمود إلى رقم للاستخدام في XLSX
     const cellAddress = columnName + (rowIndex + 1);
     const cell = sheet[cellAddress];
     return cell ? cell.v : null;
@@ -214,33 +191,26 @@ const BB = () => {
     // تنسيق خاص لكل مؤشر
     switch(kpiId) {
       case 'crossmatchRatio':
-        // نسبة التطابق/النقل: تقريب إلى رقمين عشريين بدون علامة النسبة
         return numValue.toFixed(2);
         
       case 'expiredUnits':
       case 'discardedUnits':
-        // للقيم المئوية الصغيرة التي قد تكون أقل من 1%
         if (numValue < 1 && numValue !== 0) {
-          // إذا كانت القيمة أصغر من 1، ضربها في 100 وعرضها كنسبة مئوية
           return `${(numValue * 100).toFixed(1)}%`;
         } else {
-          // إذا كانت أكبر من أو تساوي 1، عرضها كنسبة مئوية مباشرة
           return `${numValue.toFixed(1)}%`;
         }
         
       case 'femaleDonors':
       case 'adverseEvents':
       case 'volunteerDonors':
-        // إذا كانت القيمة بين 0 و1، افترض أنها نسبة عشرية تحتاج ضرب في 100
         if (numValue < 1 && numValue > 0) {
           return `${(numValue * 100).toFixed(2)}%`;
         } else {
-          // وإلا اعرضها كما هي مع علامة النسبة المئوية
           return `${numValue.toFixed(2)}%`;
         }
         
       default:
-        // التنسيق الافتراضي
         if (numValue < 1 && numValue !== 0) {
           return `${(numValue * 100).toFixed(1)}%`;
         }
@@ -320,6 +290,13 @@ const BB = () => {
         setLoading(true);
         setError('');
         
+        // التحقق من وجود البيانات في التخزين المؤقت
+        if (kpiCacheRef.current[selectedFile]) {
+          setKpis(kpiCacheRef.current[selectedFile]);
+          setLoading(false);
+          return;
+        }
+        
         const response = await fetch(`http://localhost:3001/data/BB/${selectedFile}`, {
           signal: abortController.signal
         });
@@ -335,10 +312,8 @@ const BB = () => {
         if (!isMounted) return;
         
         const sheetNames = workbook.SheetNames;
-        // تحديد ورقة العمل الثالثة (إذا كانت موجودة) حسب الصورة
-        let targetSheetIndex = 2; // الفهرس 2 يمثل الورقة الثالثة (لأن الفهارس تبدأ من 0)
+        let targetSheetIndex = 2;
         
-        // إذا لم تكن هناك ورقة ثالثة، استخدم الورقة الأولى
         if (sheetNames.length <= targetSheetIndex) {
           targetSheetIndex = 0;
         }
@@ -348,6 +323,9 @@ const BB = () => {
         
         // استخراج القيم مباشرة من ورقة العمل
         const extractedKpis = findKpisInExcel(sheet);
+        
+        // حفظ البيانات في التخزين المؤقت
+        kpiCacheRef.current[selectedFile] = extractedKpis;
         
         if (isMounted) {
           setKpis(extractedKpis);
@@ -377,170 +355,6 @@ const BB = () => {
       abortController.abort();
     };
   }, [selectedFile, kpiDefinitions, defaultValues]);
-  
-  const loadChartsData = useCallback(async () => {
-    // التحقق من وجود ملفات للتحليل
-    if (!excelFiles || excelFiles.length === 0) {
-      return;
-    }
-
-    // التحقق من وجود البيانات في التخزين المؤقت
-    const cacheKey = excelFiles.join('-');
-    if (chartsDataCacheRef.current[cacheKey]) {
-      setChartsData(chartsDataCacheRef.current[cacheKey]);
-      return;
-    }
-
-    try {
-      setChartsLoading(true);
-      
-      // تجهيز مسارات الملفات
-      const filePaths = excelFiles.map(file => `BB/${file}`);
-      
-      // تحميل البيانات الزمنية بالتوازي لتحسين الأداء
-      const [
-        crossmatchRatioData,
-        expiredUnitsData,
-        volunteerDonorsData,
-        femaleDonorsData
-      ] = await Promise.all([
-        // نسبة التطابق / النقل
-        excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'kpi',
-          'B', // عمود نسبة التطابق/النقل
-          5, // الصف المستهدف
-          null // لا يحتاج تحويل
-        ),
-        
-        // نسبة خلايا الدم المنتهية الصلاحية
-        excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'kpi',
-          'D', // عمود نسبة الخلايا المنتهية الصلاحية
-          5, // الصف المستهدف
-          excelAnalyticsService.transformers.percentage
-        ),
-        
-        // نسبة متبرعي الدم المتطوعين
-        excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'kpi',
-          'J', // عمود نسبة المتبرعين المتطوعين
-          5, // الصف المستهدف
-          excelAnalyticsService.transformers.percentage
-        ),
-        
-        // نسبة متبرعات الدم الإناث
-        excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'kpi',
-          'F', // عمود نسبة المتبرعات الإناث
-          5, // الصف المستهدف
-          excelAnalyticsService.transformers.percentage
-        )
-      ]);
-      
-      // إذا لم تكن هناك بيانات كافية، استخدام بيانات مؤقتة للعرض
-      if (crossmatchRatioData.data.length < 2) {
-        crossmatchRatioData.data = [1.8, 1.6, 1.5, 1.4, 1.3, 1.2];
-        crossmatchRatioData.labels = Array(6).fill().map((_, i) => {
-          const date = new Date();
-          date.setMonth(date.getMonth() - (5 - i));
-          return excelAnalyticsService.formatDateArabic(date);
-        });
-        crossmatchRatioData.metadata = {
-          min: Math.min(...crossmatchRatioData.data),
-          max: Math.max(...crossmatchRatioData.data),
-          avg: crossmatchRatioData.data.reduce((a, b) => a + b, 0) / crossmatchRatioData.data.length,
-          isPlaceholder: true
-        };
-      }
-      
-      // بيانات أنواع الدم (بيانات افتراضية)
-      const bloodTypes = {
-        labels: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
-        data: [
-          Math.round(Math.random() * 3000 + 2000),
-          Math.round(Math.random() * 500 + 300),
-          Math.round(Math.random() * 2000 + 1500),
-          Math.round(Math.random() * 300 + 200),
-          Math.round(Math.random() * 1000 + 500),
-          Math.round(Math.random() * 200 + 100),
-          Math.round(Math.random() * 4000 + 3000),
-          Math.round(Math.random() * 700 + 500)
-        ],
-        metadata: {
-          total: 0
-        }
-      };
-      
-      bloodTypes.metadata.total = bloodTypes.data.reduce((a, b) => a + b, 0);
-      
-      // بيانات التبرعات حسب الشهر (بيانات افتراضية أو موقعها في ملفات الإكسل)
-      const donationsByMonth = {
-        labels: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو'],
-        data: Array(6).fill().map(() => Math.round(Math.random() * 3000 + 2000)),
-        metadata: {
-          avg: 0
-        }
-      };
-      
-      donationsByMonth.metadata.avg = donationsByMonth.data.reduce((a, b) => a + b, 0) / donationsByMonth.data.length;
-      
-      // بيانات أسباب التبرع (بيانات افتراضية)
-      const donationReasons = {
-        labels: ['تبرع طوعي', 'مريض قريب', 'حملة تبرع', 'مناسبة دينية', 'أخرى'],
-        data: [
-          Math.round(Math.random() * 2000 + 4000),
-          Math.round(Math.random() * 1000 + 2000),
-          Math.round(Math.random() * 1500 + 1500),
-          Math.round(Math.random() * 1000 + 500),
-          Math.round(Math.random() * 500 + 200)
-        ],
-        metadata: {
-          total: 0
-        }
-      };
-      
-      donationReasons.metadata.total = donationReasons.data.reduce((a, b) => a + b, 0);
-      
-      // تجميع البيانات
-      const newChartsData = {
-        timeSeriesData: {
-          crossmatchRatio: crossmatchRatioData,
-          expiredUnits: expiredUnitsData.data.length < 2 ? excelAnalyticsService.generatePlaceholderData(6, 2, 5) : expiredUnitsData,
-          volunteerDonors: volunteerDonorsData.data.length < 2 ? excelAnalyticsService.generatePlaceholderData(6, 65, 85) : volunteerDonorsData,
-          femaleDonors: femaleDonorsData.data.length < 2 ? excelAnalyticsService.generatePlaceholderData(6, 5, 20) : femaleDonorsData
-        },
-        comparativeData: {
-          bloodTypes,
-          donationsByMonth,
-          donationReasons
-        }
-      };
-      
-      // تخزين البيانات في التخزين المؤقت
-      chartsDataCacheRef.current[cacheKey] = newChartsData;
-      
-      // تحديث الحالة
-      setChartsData(newChartsData);
-    } catch (err) {
-      console.error('خطأ في تحميل بيانات الرسوم البيانية:', err);
-    } finally {
-      setChartsLoading(false);
-    }
-  }, [excelFiles]);
-  
-  // تحميل بيانات الرسوم البيانية عند تغيير قائمة الملفات
-  useEffect(() => {
-    // تنفيذ التحميل بتأخير بسيط لتفادي التضارب مع تحميل البيانات الأساسية
-    const timeoutId = setTimeout(() => {
-      loadChartsData();
-    }, 300);
-    
-    return () => clearTimeout(timeoutId);
-  }, [excelFiles, loadChartsData]);
   
   const getSelectedFileDate = useCallback(() => {
     if (!selectedFile) return '';
@@ -585,34 +399,6 @@ const BB = () => {
   });
   
   KpiCard.displayName = 'KpiCard';
-
-  const tableRows = useMemo(() => {
-    return kpiDefinitions.map((kpi) => {
-      const { color, label } = getKpiEvaluation(kpi.id, kpis[kpi.id]);
-      return (
-        <tr key={kpi.id}>
-          <td className="px-6 py-4 whitespace-normal text-sm text-gray-900">
-            <div className="font-medium">{kpi.title}</div>
-            <div className="text-xs text-gray-500">{kpi.englishTitle}</div>
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-900 font-bold">
-            {kpis[kpi.id] || '-'}
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
-            {kpi.targetText}
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center">
-            <span 
-              className="px-2 py-1 text-xs font-medium rounded-full" 
-              style={{ backgroundColor: color, color: 'white' }}
-            >
-              {label}
-            </span>
-          </td>
-        </tr>
-      );
-    });
-  }, [kpiDefinitions, kpis, getKpiEvaluation]);
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
@@ -679,329 +465,6 @@ const BB = () => {
                       {kpiDefinitions.slice(3, 6).map((kpi) => (
                         <KpiCard key={kpi.id} kpi={kpi} />
                       ))}
-                    </div>
-                  </div>
-
-                  {/* قسم الرسوم البيانية الزمنية */}
-                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-                    <h2 className="text-base font-bold text-gray-700 mb-4 border-r-4 border-red-500 pr-2">
-                      اتجاهات مؤشرات الأداء بمرور الوقت
-                    </h2>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* رسم بياني: نسبة التطابق/النقل عبر الزمن */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          نسبة التطابق/النقل
-                          {chartsData.timeSeriesData.crossmatchRatio.metadata.isPlaceholder && (
-                            <span className="text-xs mr-2 font-normal text-gray-500">(بيانات تقديرية)</span>
-                          )}
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <TimeComparisonChart 
-                              data={chartsData.timeSeriesData.crossmatchRatio.data}
-                              labels={chartsData.timeSeriesData.crossmatchRatio.labels}
-                              title=""
-                              label="نسبة التطابق/النقل"
-                              height={250}
-                              backgroundColor="rgba(255, 99, 132, 0.2)"
-                              borderColor="rgba(255, 99, 132, 1)"
-                              yAxisMin={0}
-                              benchmark={1.5}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>الحد الأقصى الموصى به: <span className="font-bold">1.5</span></div>
-                          <div>
-                            {chartsData.timeSeriesData.crossmatchRatio.data.length > 0 && (
-                              <>المتوسط: <span className="font-bold">
-                                {(chartsData.timeSeriesData.crossmatchRatio.data.reduce((a, b) => a + b, 0) / 
-                                chartsData.timeSeriesData.crossmatchRatio.data.length).toFixed(2)}
-                              </span></>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* رسم بياني: نسبة وحدات الدم منتهية الصلاحية */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          نسبة وحدات الدم منتهية الصلاحية
-                          {chartsData.timeSeriesData.expiredUnits.metadata.isPlaceholder && (
-                            <span className="text-xs mr-2 font-normal text-gray-500">(بيانات تقديرية)</span>
-                          )}
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <TimeComparisonChart 
-                              data={chartsData.timeSeriesData.expiredUnits.data}
-                              labels={chartsData.timeSeriesData.expiredUnits.labels}
-                              title=""
-                              label="النسبة المئوية"
-                              height={250}
-                              backgroundColor="rgba(255, 159, 64, 0.2)"
-                              borderColor="rgba(255, 159, 64, 1)"
-                              yAxisMin={0}
-                              isPercentage={true}
-                              benchmark={3.5}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>الحد الأقصى الموصى به: <span className="font-bold">3.5%</span></div>
-                          <div>
-                            {chartsData.timeSeriesData.expiredUnits.data.length > 0 && (
-                              <>المتوسط: <span className="font-bold">
-                                {(chartsData.timeSeriesData.expiredUnits.data.reduce((a, b) => a + b, 0) / 
-                                chartsData.timeSeriesData.expiredUnits.data.length).toFixed(1)}%
-                              </span></>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* رسم بياني: نسبة متبرعي الدم المتطوعين */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          نسبة متبرعي الدم المتطوعين
-                          {chartsData.timeSeriesData.volunteerDonors.metadata.isPlaceholder && (
-                            <span className="text-xs mr-2 font-normal text-gray-500">(بيانات تقديرية)</span>
-                          )}
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <TimeComparisonChart 
-                              data={chartsData.timeSeriesData.volunteerDonors.data}
-                              labels={chartsData.timeSeriesData.volunteerDonors.labels}
-                              title=""
-                              label="النسبة المئوية"
-                              height={250}
-                              backgroundColor="rgba(54, 162, 235, 0.2)"
-                              borderColor="rgba(54, 162, 235, 1)"
-                              yAxisMin={50}
-                              isPercentage={true}
-                              benchmark={80}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>الحد الأدنى الموصى به: <span className="font-bold">80%</span></div>
-                          <div>
-                            {chartsData.timeSeriesData.volunteerDonors.data.length > 0 && (
-                              <>المتوسط: <span className="font-bold">
-                                {(chartsData.timeSeriesData.volunteerDonors.data.reduce((a, b) => a + b, 0) / 
-                                chartsData.timeSeriesData.volunteerDonors.data.length).toFixed(1)}%
-                              </span></>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* رسم بياني: نسبة متبرعات الدم الإناث */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          نسبة متبرعات الدم الإناث
-                          {chartsData.timeSeriesData.femaleDonors.metadata.isPlaceholder && (
-                            <span className="text-xs mr-2 font-normal text-gray-500">(بيانات تقديرية)</span>
-                          )}
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <TimeComparisonChart 
-                              data={chartsData.timeSeriesData.femaleDonors.data}
-                              labels={chartsData.timeSeriesData.femaleDonors.labels}
-                              title=""
-                              label="النسبة المئوية"
-                              height={250}
-                              backgroundColor="rgba(153, 102, 255, 0.2)"
-                              borderColor="rgba(153, 102, 255, 1)"
-                              yAxisMin={0}
-                              isPercentage={true}
-                              benchmark={15}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>الحد الأدنى الموصى به: <span className="font-bold">15%</span></div>
-                          <div>
-                            {chartsData.timeSeriesData.femaleDonors.data.length > 0 && (
-                              <>المتوسط: <span className="font-bold">
-                                {(chartsData.timeSeriesData.femaleDonors.data.reduce((a, b) => a + b, 0) / 
-                                chartsData.timeSeriesData.femaleDonors.data.length).toFixed(1)}%
-                              </span></>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* قسم الرسوم البيانية المقارنة */}
-                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-                    <h2 className="text-base font-bold text-gray-700 mb-4 border-r-4 border-red-500 pr-2">
-                      إحصائيات وتحليلات بنك الدم
-                    </h2>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* رسم بياني: أنواع الدم */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          توزيع فصائل الدم المتبرع بها
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <ComparativeBarChart 
-                              data={chartsData.comparativeData.bloodTypes.data}
-                              labels={chartsData.comparativeData.bloodTypes.labels}
-                              title=""
-                              label="عدد وحدات الدم"
-                              height={250}
-                              colors={[
-                                'rgba(255, 99, 132, 0.7)',
-                                'rgba(255, 99, 132, 0.5)',
-                                'rgba(54, 162, 235, 0.7)',
-                                'rgba(54, 162, 235, 0.5)',
-                                'rgba(255, 206, 86, 0.7)',
-                                'rgba(255, 206, 86, 0.5)',
-                                'rgba(75, 192, 192, 0.7)',
-                                'rgba(75, 192, 192, 0.5)',
-                              ]}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>إجمالي عدد الوحدات: <span className="font-bold">
-                            {chartsData.comparativeData.bloodTypes.metadata.total && 
-                             chartsData.comparativeData.bloodTypes.metadata.total.toLocaleString() || '0'}
-                          </span></div>
-                          <div>فصيلة الدم الأكثر تبرعاً: <span className="font-bold">
-                            {chartsData.comparativeData.bloodTypes.labels[
-                              chartsData.comparativeData.bloodTypes.data.indexOf(
-                                Math.max(...chartsData.comparativeData.bloodTypes.data)
-                              )
-                            ]}
-                          </span></div>
-                        </div>
-                      </div>
-
-                      {/* رسم بياني: التبرعات حسب الشهر */}
-                      <div className="bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          عدد التبرعات حسب الشهر
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <ComparativeBarChart 
-                              data={chartsData.comparativeData.donationsByMonth.data}
-                              labels={chartsData.comparativeData.donationsByMonth.labels}
-                              title=""
-                              label="عدد التبرعات"
-                              height={250}
-                              colors={[
-                                'rgba(54, 162, 235, 0.7)',
-                                'rgba(75, 192, 192, 0.7)',
-                                'rgba(153, 102, 255, 0.7)',
-                                'rgba(255, 159, 64, 0.7)',
-                                'rgba(255, 99, 132, 0.7)',
-                                'rgba(255, 206, 86, 0.7)',
-                              ]}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>متوسط التبرعات الشهرية: <span className="font-bold">
-                            {Math.round(chartsData.comparativeData.donationsByMonth.metadata.avg).toLocaleString()}
-                          </span></div>
-                          <div>الشهر الأكثر تبرعاً: <span className="font-bold">
-                            {chartsData.comparativeData.donationsByMonth.labels[
-                              chartsData.comparativeData.donationsByMonth.data.indexOf(
-                                Math.max(...chartsData.comparativeData.donationsByMonth.data)
-                              )
-                            ]}
-                          </span></div>
-                        </div>
-                      </div>
-
-                      {/* رسم بياني: أسباب التبرع */}
-                      <div className="col-span-1 lg:col-span-2 bg-gray-50 rounded-lg p-3 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">
-                          توزيع أسباب التبرع بالدم
-                        </h3>
-                        <div className="h-64">
-                          <Suspense fallback={<div className="flex items-center justify-center h-full">
-                            <div className="text-gray-400 text-sm">جاري تحميل الرسم البياني...</div>
-                          </div>}>
-                            <ComparativeBarChart 
-                              data={chartsData.comparativeData.donationReasons.data}
-                              labels={chartsData.comparativeData.donationReasons.labels}
-                              title=""
-                              label="عدد المتبرعين"
-                              height={250}
-                              colors={[
-                                'rgba(54, 162, 235, 0.7)',
-                                'rgba(255, 99, 132, 0.7)',
-                                'rgba(255, 206, 86, 0.7)',
-                                'rgba(75, 192, 192, 0.7)',
-                                'rgba(153, 102, 255, 0.7)',
-                              ]}
-                              direction="rtl"
-                            />
-                          </Suspense>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-600 flex justify-between">
-                          <div>إجمالي المتبرعين: <span className="font-bold">
-                            {chartsData.comparativeData.donationReasons.metadata.total && 
-                             chartsData.comparativeData.donationReasons.metadata.total.toLocaleString() || '0'}
-                          </span></div>
-                          <div>السبب الأكثر شيوعاً: <span className="font-bold">
-                            {chartsData.comparativeData.donationReasons.labels[
-                              chartsData.comparativeData.donationReasons.data.indexOf(
-                                Math.max(...chartsData.comparativeData.donationReasons.data)
-                              )
-                            ]}
-                          </span></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-                    <h2 className="text-base font-bold text-gray-700 mb-4 border-r-4 border-red-500 pr-2">تفاصيل مؤشرات الأداء</h2>
-                    
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">المؤشر</th>
-                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">القيمة الحالية</th>
-                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">القيمة المستهدفة</th>
-                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">التقييم</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {tableRows}
-                        </tbody>
-                      </table>
                     </div>
                   </div>
                   

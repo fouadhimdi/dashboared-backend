@@ -4,9 +4,24 @@ import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
-import TimeComparisonChart from '../components/charts/TimeComparisonChart';
-import ComparativeBarChart from '../components/charts/ComparativeBarChart';
-import { excelAnalyticsService } from '../services/excelAnalyticsService';
+
+// Helper functions to replace excelAnalyticsService
+const generatePlaceholderData = (count, min, max, customLabels = null) => {
+  const data = Array.from({ length: count }, () => Math.floor(Math.random() * (max - min + 1) + min));
+  const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  const labels = customLabels || months.slice(0, count);
+  
+  return {
+    labels,
+    data,
+    metadata: {
+      min: Math.min(...data),
+      max: Math.max(...data),
+      avg: data.reduce((a, b) => a + b, 0) / data.length,
+      isPlaceholder: true
+    }
+  };
+};
 
 const ED = () => {
   const navigate = useNavigate();
@@ -18,23 +33,6 @@ const ED = () => {
   const [selectedFile, setSelectedFile] = useState('');
   const [currentPage, setCurrentPage] = useState('emergency');
   
-  // بيانات مؤشرات الأداء الرئيسية عبر الزمن
-  const [timeSeriesData, setTimeSeriesData] = useState({
-    doorToDoctor: { labels: [], data: [], metadata: {} },
-    doorToDisposition: { labels: [], data: [], metadata: {} },
-    patientVolume: { labels: [], data: [], metadata: {} },
-    mortalityRate: { labels: [], data: [], metadata: {} }
-  });
-  
-  // بيانات المقارنة بين الفئات
-  const [comparativeData, setComparativeData] = useState({
-    dischargeDestinations: { labels: [], data: [], metadata: {} },
-    ctas: { labels: [], data: [], metadata: {} }
-  });
-  
-  // حالة تحميل الرسوم البيانية
-  const [chartsLoading, setChartsLoading] = useState(false);
-
   // البنش مارك لكل مؤشر
   const benchmarks = {
     // KPI 1: Door to Doctor (بالدقائق)
@@ -359,205 +357,6 @@ const ED = () => {
     loadExcelData();
   }, [selectedFile]);
   
-  // وظيفة لقراءة بيانات الرسوم البيانية من مجموعة الملفات
-  useEffect(() => {
-    const loadHistoricalData = async () => {
-      if (!excelFiles || excelFiles.length === 0) {
-        // Use fallback data if no files available
-        setTimeSeriesData({
-          doorToDoctor: excelAnalyticsService.generatePlaceholderData(6, 5, 25),
-          doorToDisposition: excelAnalyticsService.generatePlaceholderData(6, 75, 98),
-          patientVolume: excelAnalyticsService.generatePlaceholderData(6, 50, 150),
-          mortalityRate: excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
-        });
-        
-        setComparativeData({
-          dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
-          ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
-        });
-        
-        return;
-      }
-
-      try {
-        setChartsLoading(true);
-        
-        // تحضير مسارات الملفات
-        const filePaths = excelFiles.map(file => `ED/${file}`);
-        
-        console.log("Processing ED files:", filePaths);
-        
-        // استخراج بيانات وقت الانتظار للطبيب عبر الزمن (KPI 1)
-        const doorToDoctorData = await excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'ed kpis',
-          'AC', // عمود وقت الانتظار للطبيب
-          7, // صف إجمالي المرضى
-          excelAnalyticsService.transformers.timeInMinutes
-        );
-        
-        // استخراج بيانات نسبة الإستجابة خلال 4 ساعات عبر الزمن (KPI 5)
-        const doorToDispositionData = await excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'ed kpis',
-          'AO', // عمود نسبة الإستجابة خلال 4 ساعات
-          7, // صف إجمالي المرضى
-          excelAnalyticsService.transformers.percentage
-        );
-        
-        // استخراج بيانات إجمالي المرضى عبر الزمن
-        const patientVolumeData = await excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'ed kpis',
-          'AN', // عمود إجمالي المرضى
-          7, // صف إجمالي المرضى
-          excelAnalyticsService.transformers.count
-        );
-        
-        // استخراج بيانات معدل الوفيات عبر الزمن (KPI 7)
-        const mortalityRateData = await excelAnalyticsService.extractTimeSeriesData(
-          filePaths,
-          'ed kpis',
-          'AS', // عمود معدل الوفيات
-          7, // صف إجمالي المرضى
-          excelAnalyticsService.transformers.percentage
-        );
-        
-        // تحديث حالة البيانات - اضافة بيانات إفتراضية إذا لم تتوفر بيانات حقيقية
-        setTimeSeriesData({
-          doorToDoctor: doorToDoctorData.data.length > 0 ? doorToDoctorData : excelAnalyticsService.generatePlaceholderData(6, 5, 25),
-          doorToDisposition: doorToDispositionData.data.length > 0 ? doorToDispositionData : excelAnalyticsService.generatePlaceholderData(6, 75, 98),
-          patientVolume: patientVolumeData.data.length > 0 ? patientVolumeData : excelAnalyticsService.generatePlaceholderData(6, 50, 150),
-          mortalityRate: mortalityRateData.data.length > 0 ? mortalityRateData : excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
-        });
-        
-        // استخراج بيانات المقارنة من الملف المحدد للوجهات النهائية للمرضى
-        if (selectedFile) {
-          console.log("Processing comparative data for:", selectedFile);
-          
-          const dischargeColumnsIds = ['AU', 'AV', 'AW', 'AX']; // أعمدة وجهات المرضى
-          const dischargeLabels = [
-            'القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر'
-          ];
-          
-          // تجربة عدة أعمدة مختلفة إذا كان هناك اختلاف في بنية الملف
-          const tryColumns = async (columnIds, altColumnIds, rowPosition, labels, transformer) => {
-            let data = await excelAnalyticsService.extractComparativeData(
-              `ED/${selectedFile}`,
-              'ed kpis', // try primary sheet name
-              columnIds,
-              rowPosition,
-              labels,
-              transformer
-            );
-            
-            // إذا لم توجد بيانات، تجربة الأعمدة البديلة
-            if (!data || data.data.length === 0 || data.data.every(val => val === 0)) {
-              console.log("Trying alternative columns", altColumnIds);
-              data = await excelAnalyticsService.extractComparativeData(
-                `ED/${selectedFile}`,
-                'ed kpis', // still use primary sheet
-                altColumnIds,
-                rowPosition,
-                labels,
-                transformer
-              );
-            }
-            
-            // إذا لم توجد بيانات، تجربة أسماء أوراق عمل بديلة
-            if (!data || data.data.length === 0 || data.data.every(val => val === 0)) {
-              console.log("Trying alternative sheet");
-              data = await excelAnalyticsService.extractComparativeData(
-                `ED/${selectedFile}`,
-                'kpis', // try alternative sheet name
-                columnIds,
-                rowPosition,
-                labels,
-                transformer
-              );
-            }
-            
-            return data;
-          };
-          
-          // استخراج بيانات الوجهات النهائية للمرضى
-          const dischargeData = await tryColumns(
-            dischargeColumnsIds,
-            ['U', 'V', 'W', 'X'], // أعمدة بديلة للتجربة
-            7, // صف إجمالي المرضى
-            dischargeLabels,
-            excelAnalyticsService.transformers.count
-          );
-          
-          // استخراج بيانات تصنيف المرضى CTAS
-          const ctasColumnIds = ['AB'];
-          const altCtasColumnIds = ['B']; // عمود بديل للتصنيف
-          const ctasData = await tryColumns(
-            ctasColumnIds,
-            altCtasColumnIds,
-            2, // CTAS 1 - صف بداية التصنيف
-            ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'],
-            excelAnalyticsService.transformers.count
-          );
-          
-          // تعديل البيانات لتتضمن جميع فئات CTAS (من الصف 2 إلى 6)
-          for (let i = 3; i <= 6; i++) {
-            try {
-              const ctasValue = await tryColumns(
-                ctasColumnIds,
-                altCtasColumnIds,
-                i,
-                null,
-                excelAnalyticsService.transformers.count
-              );
-              
-              if (ctasValue && ctasValue.data.length > 0) {
-                ctasData.data[i-2] = ctasValue.data[0] || 0;
-              }
-            } catch (err) {
-              console.error(`Error extracting CTAS data for row ${i}:`, err);
-            }
-          }
-          
-          // استخدام بيانات إفتراضية إذا لم تتوفر بيانات حقيقية
-          setComparativeData({
-            dischargeDestinations: dischargeData.data.some(val => val > 0) ? 
-              dischargeData : 
-              excelAnalyticsService.generatePlaceholderData(4, 10, 50, dischargeLabels),
-            ctas: ctasData.data.some(val => val > 0) ? 
-              ctasData : 
-              excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
-          });
-        } else {
-          // توفير بيانات افتراضية إذا لم يتم اختيار ملف
-          setComparativeData({
-            dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
-            ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
-          });
-        }
-      } catch (err) {
-        console.error('Error loading historical data:', err);
-        
-        // توفير بيانات افتراضية في حالة حدوث خطأ
-        setTimeSeriesData({
-          doorToDoctor: excelAnalyticsService.generatePlaceholderData(6, 5, 25),
-          doorToDisposition: excelAnalyticsService.generatePlaceholderData(6, 75, 98),
-          patientVolume: excelAnalyticsService.generatePlaceholderData(6, 50, 150),
-          mortalityRate: excelAnalyticsService.generatePlaceholderData(6, 0.5, 3)
-        });
-        
-        setComparativeData({
-          dischargeDestinations: excelAnalyticsService.generatePlaceholderData(4, 10, 50, ['القسم الداخلي', 'العناية المركزة', 'المنزل', 'مرفق آخر']),
-          ctas: excelAnalyticsService.generatePlaceholderData(5, 5, 50, ['CTAS 1', 'CTAS 2', 'CTAS 3', 'CTAS 4', 'CTAS 5'])
-        });
-      } finally {
-        setChartsLoading(false);
-      }
-    };
-    
-    loadHistoricalData();
-  }, [excelFiles, selectedFile]);
-  
   // تعريف عناصر القائمة الجانبية
   const menuItems = [
     { id: 'admin', label: 'لوحة التحكم', icon: '👨‍💼', path: '/admin' },
@@ -695,7 +494,7 @@ const ED = () => {
                     <div>
                       <p className="text-xs font-medium text-gray-500">نسبة الإستجابة خلال 4 ساعات</p>
                       <p className="text-lg font-bold text-gray-800 mt-0.5">
-                        {tableData.rows && tableData.rows[0] && tableData.rows[5][13] ? tableData.rows[5][13] : '-'}
+                        {tableData.rows && tableData.rows[5] && tableData.rows[5][13] ? tableData.rows[5][13] : '-'}
                       </p>
                     </div>
                     <div className="p-2 bg-green-100 rounded-lg">
@@ -715,7 +514,7 @@ const ED = () => {
                     <div>
                       <p className="text-xs font-medium text-gray-500">معدل الوفيات</p>
                       <p className="text-lg font-bold text-gray-800 mt-0.5">
-                        {tableData.rows && tableData.rows[0] && tableData.rows[5][17] ? tableData.rows[5][17] : '-'}
+                        {tableData.rows && tableData.rows[5] && tableData.rows[5][17] ? tableData.rows[5][17] : '-'}
                       </p>
                     </div>
                     <div className="p-2 bg-red-100 rounded-lg">
@@ -842,327 +641,9 @@ const ED = () => {
                 </div>
               )}
               
-              {/* قسم الرسوم البيانية والمقارنات */}
-              <div className="mt-6">
-                <h2 className="text-lg font-bold text-gray-800 mb-4">تحليل البيانات والمقارنات</h2>
-                
-                {chartsLoading ? (
-                  <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
-                    <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-sm text-gray-600 mt-2">جاري تحميل الرسوم البيانية...</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* المؤشرات الرئيسية عبر الزمن */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                      {/* رسم بياني لوقت الانتظار للطبيب (KPI 1) */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {timeSeriesData.doorToDoctor.data.length > 0 ? (
-                          <>
-                            <TimeComparisonChart 
-                              data={timeSeriesData.doorToDoctor.data}
-                              labels={timeSeriesData.doorToDoctor.labels}
-                              title="وقت الانتظار للطبيب عبر الزمن"
-                              label="متوسط الدقائق"
-                              backgroundColor="rgba(54, 162, 235, 0.2)"
-                              borderColor="rgba(54, 162, 235, 1)"
-                              benchmark={10} // القيمة المستهدفة
-                              height={250}
-                              isTime={true}
-                              yAxisLabel="الوقت (دقائق)"
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <div className="grid grid-cols-3 gap-2 mt-2">
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">متوسط وقت الانتظار</p>
-                                  <p className="text-base font-bold text-indigo-600">
-                                    {timeSeriesData.doorToDoctor.metadata.avg ? 
-                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.avg)} دقيقة` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أقل وقت انتظار</p>
-                                  <p className="text-base font-bold text-green-600">
-                                    {timeSeriesData.doorToDoctor.metadata.min ? 
-                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.min)} دقيقة` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أعلى وقت انتظار</p>
-                                  <p className="text-base font-bold text-red-600">
-                                    {timeSeriesData.doorToDoctor.metadata.max ? 
-                                      `${Math.round(timeSeriesData.doorToDoctor.metadata.max)} دقيقة` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* رسم بياني لنسبة الاستجابة خلال 4 ساعات (KPI 5) */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {timeSeriesData.doorToDisposition.data.length > 0 ? (
-                          <>
-                            <TimeComparisonChart 
-                              data={timeSeriesData.doorToDisposition.data}
-                              labels={timeSeriesData.doorToDisposition.labels}
-                              title="نسبة الاستجابة خلال 4 ساعات عبر الزمن"
-                              label="النسبة المئوية"
-                              backgroundColor="rgba(75, 192, 192, 0.2)"
-                              borderColor="rgba(75, 192, 192, 1)"
-                              benchmark={95} // القيمة المستهدفة 95%
-                              height={250}
-                              isPercentage={true}
-                              yAxisMin={0}
-                              yAxisMax={100}
-                              yAxisLabel="النسبة المئوية"
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <div className="grid grid-cols-3 gap-2 mt-2">
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">متوسط النسبة</p>
-                                  <p className="text-base font-bold text-indigo-600">
-                                    {timeSeriesData.doorToDisposition.metadata.avg ? 
-                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.avg)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أقل نسبة</p>
-                                  <p className="text-base font-bold text-red-600">
-                                    {timeSeriesData.doorToDisposition.metadata.min ? 
-                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.min)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أعلى نسبة</p>
-                                  <p className="text-base font-bold text-green-600">
-                                    {timeSeriesData.doorToDisposition.metadata.max ? 
-                                      `${Math.round(timeSeriesData.doorToDisposition.metadata.max)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* رسم بياني لإجمالي المرضى */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {timeSeriesData.patientVolume.data.length > 0 ? (
-                          <>
-                            <TimeComparisonChart 
-                              data={timeSeriesData.patientVolume.data}
-                              labels={timeSeriesData.patientVolume.labels}
-                              title="عدد المرضى عبر الزمن"
-                              label="عدد المرضى"
-                              backgroundColor="rgba(153, 102, 255, 0.2)"
-                              borderColor="rgba(153, 102, 255, 1)"
-                              height={250}
-                              yAxisMin={0}
-                              yAxisLabel="عدد المرضى"
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <div className="grid grid-cols-3 gap-2 mt-2">
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">متوسط عدد المرضى</p>
-                                  <p className="text-base font-bold text-indigo-600">
-                                    {timeSeriesData.patientVolume.metadata.avg ? 
-                                      Math.round(timeSeriesData.patientVolume.metadata.avg) : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أقل عدد</p>
-                                  <p className="text-base font-bold text-gray-600">
-                                    {timeSeriesData.patientVolume.metadata.min}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أعلى عدد</p>
-                                  <p className="text-base font-bold text-gray-600">
-                                    {timeSeriesData.patientVolume.metadata.max}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* رسم بياني لمعدل الوفيات (KPI 7) */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {timeSeriesData.mortalityRate.data.length > 0 ? (
-                          <>
-                            <TimeComparisonChart 
-                              data={timeSeriesData.mortalityRate.data}
-                              labels={timeSeriesData.mortalityRate.labels}
-                              title="معدل الوفيات عبر الزمن"
-                              label="نسبة الوفيات"
-                              backgroundColor="rgba(255, 99, 132, 0.2)"
-                              borderColor="rgba(255, 99, 132, 1)"
-                              benchmark={1} // القيمة المستهدفة 1%
-                              height={250}
-                              isPercentage={true}
-                              yAxisMin={0}
-                              yAxisMax={Math.max(5, Math.ceil(timeSeriesData.mortalityRate.metadata.max || 0))}
-                              yAxisLabel="النسبة المئوية"
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <div className="grid grid-cols-3 gap-2 mt-2">
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">متوسط المعدل</p>
-                                  <p className="text-base font-bold text-indigo-600">
-                                    {timeSeriesData.mortalityRate.metadata.avg ? 
-                                      `${timeSeriesData.mortalityRate.metadata.avg.toFixed(2)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أقل معدل</p>
-                                  <p className="text-base font-bold text-green-600">
-                                    {timeSeriesData.mortalityRate.metadata.min ? 
-                                      `${timeSeriesData.mortalityRate.metadata.min.toFixed(2)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded-md">
-                                  <p className="text-xs text-gray-500">أعلى معدل</p>
-                                  <p className="text-base font-bold text-red-600">
-                                    {timeSeriesData.mortalityRate.metadata.max ? 
-                                      `${timeSeriesData.mortalityRate.metadata.max.toFixed(2)}%` : 
-                                      '-'}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* رسوم بيانية للمقارنات */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* وجهات المرضى النهائية */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {comparativeData.dischargeDestinations.data.length > 0 ? (
-                          <>
-                            <ComparativeBarChart 
-                              data={comparativeData.dischargeDestinations.data}
-                              labels={comparativeData.dischargeDestinations.labels}
-                              title="توزيع وجهات المرضى النهائية"
-                              label="عدد المرضى"
-                              colors={[
-                                'rgba(54, 162, 235, 0.7)',
-                                'rgba(255, 99, 132, 0.7)',
-                                'rgba(75, 192, 192, 0.7)',
-                                'rgba(255, 159, 64, 0.7)'
-                              ]}
-                              height={300}
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <p className="text-xs text-gray-500">
-                                إجمالي المرضى: {comparativeData.dischargeDestinations.data.reduce((a, b) => a + b, 0)}
-                                {comparativeData.dischargeDestinations.metadata?.isPlaceholder && 
-                                  <span className="text-xs text-amber-500 mr-1">(بيانات توضيحية)</span>
-                                }
-                              </p>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* توزيع المرضى حسب CTAS */}
-                      <div className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow duration-300">
-                        {comparativeData.ctas.data.length > 0 ? (
-                          <>
-                            <ComparativeBarChart 
-                              data={comparativeData.ctas.data}
-                              labels={comparativeData.ctas.labels}
-                              title="توزيع المرضى حسب التصنيف (CTAS)"
-                              label="عدد المرضى"
-                              colors={[
-                                'rgba(255, 99, 132, 0.7)',  // CTAS 1 (حرج)
-                                'rgba(255, 159, 64, 0.7)',  // CTAS 2 (طارئ)
-                                'rgba(255, 205, 86, 0.7)',  // CTAS 3 (عاجل)
-                                'rgba(75, 192, 192, 0.7)',  // CTAS 4 (أقل إلحاحاً)
-                                'rgba(54, 162, 235, 0.7)'   // CTAS 5 (غير عاجل)
-                              ]}
-                              height={300}
-                              direction="rtl"
-                            />
-                            <div className="mt-2 text-center">
-                              <p className="text-xs text-gray-500">
-                                إجمالي المرضى المصنفين: {comparativeData.ctas.data.reduce((a, b) => a + b, 0)}
-                                {comparativeData.ctas.metadata?.isPlaceholder && 
-                                  <span className="text-xs text-amber-500 mr-1">(بيانات توضيحية)</span>
-                                }
-                              </p>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col justify-center items-center h-64">
-                            <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="mt-2 text-sm text-gray-500">لا توجد بيانات كافية للعرض</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              
               {/* حقوق الملكية */}
               <div className="mt-2 text-center text-xs text-gray-500">
-                <p>© {new Date().toLocaleDateString('ar-SA')} قسم الطوارئ - جميع الحقوق محفوظة</p>
+                <p>© {String(new Date().getFullYear())} قسم الطوارئ - جميع الحقوق محفوظة</p>
               </div>
             </div>
           </div>

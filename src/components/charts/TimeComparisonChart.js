@@ -27,12 +27,12 @@ ChartJS.register(
 /**
  * مكون الرسم البياني لعرض البيانات على مدار الزمن مع تحسينات أداء
  * @param {Object} props خصائص المكون
- * @param {Array} props.data مصفوفة من البيانات الرقمية
+ * @param {Array|Array[]} props.data مصفوفة من البيانات الرقمية أو مصفوفة من مصفوفات البيانات
  * @param {Array} props.labels التسميات (عادة تواريخ)
  * @param {String} props.title عنوان الرسم البياني
- * @param {String} props.label تسمية مجموعة البيانات
- * @param {String} props.backgroundColor لون خلفية المنطقة تحت الخط
- * @param {String} props.borderColor لون الخط
+ * @param {String|Array} props.label تسمية مجموعة البيانات أو مصفوفة من التسميات
+ * @param {String|Array} props.backgroundColor لون خلفية المنطقة تحت الخط أو مصفوفة من الألوان
+ * @param {String|Array} props.borderColor لون الخط أو مصفوفة من الألوان
  * @param {Number} props.height ارتفاع الرسم البياني بالبكسل
  * @param {Number} props.yAxisMin الحد الأدنى للمحور Y
  * @param {Number} props.yAxisMax الحد الأقصى للمحور Y
@@ -41,6 +41,7 @@ ChartJS.register(
  * @param {Number} props.benchmark قيمة خط المرجعية للمقارنة
  * @param {String} props.yAxisLabel تسمية محور Y
  * @param {String} props.direction اتجاه العرض (rtl/ltr)
+ * @param {Boolean} props.multipleDatasets هل البيانات متعددة المجموعات
  */
 const TimeComparisonChart = ({ 
   data = [], 
@@ -56,7 +57,8 @@ const TimeComparisonChart = ({
   isTime = false,
   benchmark = null,
   yAxisLabel,
-  direction = 'ltr'
+  direction = 'ltr',
+  multipleDatasets = false
 }) => {
   const chartRef = useRef(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -72,6 +74,15 @@ const TimeComparisonChart = ({
       const minutes = Math.floor(value % 60);
       return `${hours}:${minutes.toString().padStart(2, '0')}`;
     } else if (isPercentage && typeof value === 'number') {
+      // عرض النسب المئوية برقمين عشريين دائماً
+      return `${value.toFixed(2)}%`;
+    }
+    return value;
+  };
+
+  // تنسيق القيم للعرض على المحور العمودي
+  const formatYAxisLabel = (value) => {
+    if (isPercentage) {
       // عرض النسب المئوية برقمين عشريين دائماً
       return `${value.toFixed(2)}%`;
     }
@@ -165,7 +176,7 @@ const TimeComparisonChart = ({
             size: 11
           },
           callback: function(value) {
-            return formatValue(value);
+            return formatYAxisLabel(value);
           }
         },
         title: {
@@ -195,20 +206,44 @@ const TimeComparisonChart = ({
   };
 
   // بيانات الرسم البياني
-  const chartData = {
+  let chartData = {
     labels,
-    datasets: [
-      {
-        label: label || 'البيانات',
-        data: data,
-        fill: true,
-        backgroundColor: backgroundColor,
-        borderColor: borderColor,
-        borderWidth: 2,
-        pointBackgroundColor: borderColor
-      }
-    ]
+    datasets: []
   };
+
+  // التعامل مع البيانات المتعددة أو المفردة
+  if (multipleDatasets && Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
+    // في حالة البيانات المتعددة، نفترض أن كل عنصر في مصفوفة data هو مجموعة بيانات منفصلة
+    const labels_array = Array.isArray(label) ? label : [label, label, label];
+    const bgColors_array = Array.isArray(backgroundColor) ? backgroundColor : [backgroundColor, backgroundColor, backgroundColor];
+    const borderColors_array = Array.isArray(borderColor) ? borderColor : [borderColor, borderColor, borderColor];
+    
+    // إنشاء مجموعة بيانات لكل مصفوفة بيانات
+    data.forEach((dataSet, index) => {
+      chartData.datasets.push({
+        label: labels_array[index] || `البيانات ${index + 1}`,
+        data: dataSet,
+        fill: false, // لتجنب تداخل المناطق المظللة
+        backgroundColor: bgColors_array[index] || `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.2)`,
+        borderColor: borderColors_array[index] || `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 1)`,
+        borderWidth: 2,
+        pointBackgroundColor: borderColors_array[index] || `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 1)`,
+        tension: 0.3
+      });
+    });
+  } else {
+    // في حالة البيانات المفردة، استخدم طريقة الإضافة القديمة
+    chartData.datasets.push({
+      label: Array.isArray(label) ? label[0] : label || 'البيانات',
+      data: data,
+      fill: true,
+      backgroundColor: Array.isArray(backgroundColor) ? backgroundColor[0] : backgroundColor,
+      borderColor: Array.isArray(borderColor) ? borderColor[0] : borderColor,
+      borderWidth: 2,
+      pointBackgroundColor: Array.isArray(borderColor) ? borderColor[0] : borderColor,
+      tension: 0.3
+    });
+  }
 
   // إضافة خط المعيار
   if (benchmark !== null) {
