@@ -6,6 +6,9 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+// تقديم الملفات الثابتة من مجلد public
+app.use(express.static('public'));
+
 // دالة موحدة للوصول إلى المجلدات وقراءة محتوياتها
 function readDirectoryHandler(dirName) {
   return (req, res) => {
@@ -23,57 +26,29 @@ function readDirectoryHandler(dirName) {
   };
 }
 
-// مسارات للوصول إلى المجلدات المختلفة
-app.get('/data/ED', readDirectoryHandler('ED'));
-app.get('/data/LAB', readDirectoryHandler('LAB'));
-app.get('/data/BB', readDirectoryHandler('BB'));
-app.get('/data/OR', readDirectoryHandler('OR'));
-app.get('/data/RAD', readDirectoryHandler('RAD'));
+const validFolders = ['ED', 'LAB', 'BB', 'OR', 'RAD'];
 
-// مسار للوصول إلى المجلدات الديناميكية (قائمة الملفات)
-app.get('/data/:folderName', (req, res) => {
-  const { folderName } = req.params;
-  
-  // التحقق من صحة اسم المجلد لأسباب أمنية
-  const validFolders = ['ED', 'LAB', 'BB', 'OR', 'RAD'];
-  if (!validFolders.includes(folderName)) {
-    return res.status(403).send({ 
-      message: 'Access denied: Invalid folder' 
-    });
-  }
-  
-  // إرجاع قائمة الملفات في المجلد
-  readDirectoryHandler(folderName)(req, res);
+// مسارات للوصول إلى المجلدات الثابتة والديناميكية
+validFolders.forEach(folder => {
+  app.get(`/data/${folder}`, readDirectoryHandler(folder));
 });
 
-// مسار للوصول إلى الملفات الديناميكية
 app.get('/data/:folderName/:fileName', (req, res) => {
   const { folderName, fileName } = req.params;
-  
-  // التحقق من صحة اسم المجلد لأسباب أمنية
-  const validFolders = ['ED', 'LAB', 'BB', 'OR', 'RAD'];
+
   if (!validFolders.includes(folderName)) {
-    return res.status(403).send({ 
-      message: 'Access denied: Invalid folder' 
-    });
+    return res.status(403).send({ message: 'Access denied: Invalid folder' });
   }
 
-  // إرجاع الملف المطلوب
   const filePath = path.join(__dirname, `public/data/${folderName}/${fileName}`);
   res.sendFile(filePath, (err) => {
     if (err) {
-      res.status(404).send({
-        message: `File not found: ${fileName}`
-      });
+      res.status(404).send({ message: `File not found: ${fileName}` });
     }
   });
 });
 
-// تقديم الملفات الثابتة من مجلد public
-app.use(express.static('public'));
-
-const PORT = process.env.PORT || 3001;
-// تقديم تطبيق React من مجلد build في الإنتاج
+// تقديم تطبيق React من مجلد build
 const buildPath = path.join(__dirname, 'build');
 if (fs.existsSync(buildPath)) {
   app.use(express.static(buildPath));
@@ -82,6 +57,9 @@ if (fs.existsSync(buildPath)) {
     res.sendFile(path.join(buildPath, 'index.html'));
   });
 }
+
+// الاستماع على المنفذ المطلوب
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`✅ Server is running on http://localhost:${PORT}`);
 });
