@@ -378,7 +378,7 @@ const LAB = () => {
       setLoading(true);
       setError('');
       
-      const response = await fetch(`http://localhost:3001/data/LAB/${selectedFile}`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/LAB/${selectedFile}`, {
         signal: abortController.signal
       });
       

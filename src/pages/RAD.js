@@ -192,7 +192,7 @@ const RAD = () => {
       setLoading(true);
       setError('');
       
-      const response = await fetch(`/data/RAD/${filePath}`);
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/RAD/${filePath}`);
       if (!response.ok) {
         throw new Error('فشل في تحميل بيانات الملف');
       }

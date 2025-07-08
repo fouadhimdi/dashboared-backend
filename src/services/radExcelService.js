@@ -17,7 +17,7 @@ const RadExcelService = {
   // دالة لقراءة ملف Excel محدد لقسم الأشعة
   async readRadExcelFile(fileName) {
     try {
-      const response = await fetch(`http://localhost:3001/data/RAD/${fileName}`);
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/RAD/${fileName}`);
       const fileContent = await response.arrayBuffer();
       const workbook = XLSX.read(fileContent, { 
         type: 'array',

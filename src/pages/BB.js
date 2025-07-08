@@ -330,7 +330,7 @@ const BB = () => {
           return;
         }
         
-        const response = await fetch(`http://localhost:3001/data/BB/${selectedFile}`, {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/data/BB/${selectedFile}`, {
           signal: abortController.signal
         });
         

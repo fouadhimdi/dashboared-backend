@@ -499,7 +499,7 @@ const OR = () => {
         setLoading(true);
         setError('');
         
-        const response = await fetch(`http://localhost:3001/data/OR/${selectedFile}`);
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/data/OR/${selectedFile}`);
         const fileContent = await response.arrayBuffer();
         const workbook = XLSX.read(fileContent, { type: 'array' });
         
