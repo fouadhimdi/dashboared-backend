@@ -1,32 +1,79 @@
-import usersData from '../data/users.json';
+// البيانات الافتراضية للمستخدمين
+const defaultUsers = [
+  {
+    id: 1,
+    employeeId: "admin",
+    name: "مدير النظام",
+    password: "admin123",
+    role: "admin",
+    createdAt: "2024-03-20T12:00:00Z"
+  },
+  {
+    id: 2,
+    employeeId: "user",
+    name: "مستخدم عادي",
+    password: "user123",
+    role: "user",
+    createdAt: "2024-03-20T12:00:00Z"
+  }
+];
 
 class AuthService {
   constructor() {
-    // التحقق من وجود المستخدم المسؤول وإنشاءه إذا لم يكن موجوداً
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    if (users.length === 0) {
-      // تحميل المستخدمين الافتراضيين من ملف البيانات
-      localStorage.setItem('users', JSON.stringify(usersData.users));
-    }
+    // إعادة تعيين البيانات الافتراضية في كل مرة
+    this.initializeUsers();
+  }
+
+  initializeUsers() {
+    // مسح البيانات القديمة وإنشاء بيانات جديدة
+    localStorage.setItem('users', JSON.stringify(defaultUsers));
+    console.log('تم إنشاء المستخدمين الافتراضيين:', defaultUsers);
   }
 
   login(employeeId, password) {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    // التأكد من وجود البيانات الصحيحة
+    let users = JSON.parse(localStorage.getItem('users') || '[]');
     
-    // في الإصدار المحسن، سنستخدم bcrypt للتحقق من كلمة المرور
-    // لكن الآن نقوم بالبحث عن تطابق مباشر
-    const user = users.find(
-      (u) => u.employeeId === employeeId && u.password === password
-    );
+    // إذا لم توجد بيانات أو كانت ناقصة، إعادة تهيئة
+    if (users.length === 0) {
+      this.initializeUsers();
+      users = JSON.parse(localStorage.getItem('users') || '[]');
+    }
+    
+    console.log('محاولة تسجيل دخول:', { employeeId, password });
+    console.log('المستخدمون المتاحون:', users);
+    
+    // البحث عن المستخدم مع تفاصيل أكثر
+    const user = users.find((u) => {
+      const employeeIdMatch = u.employeeId === employeeId;
+      const passwordMatch = u.password === password;
+      console.log(`مقارنة مع المستخدم ${u.employeeId}:`, {
+        employeeIdMatch,
+        passwordMatch,
+        storedEmployeeId: u.employeeId,
+        storedPassword: u.password,
+        inputEmployeeId: employeeId,
+        inputPassword: password
+      });
+      return employeeIdMatch && passwordMatch;
+    });
 
     if (user) {
-      // لا نقوم بتخزين كلمة المرور في الجلسة
+      // إزالة كلمة المرور من بيانات الجلسة
       const { password, ...userWithoutPassword } = user;
       localStorage.setItem('currentUser', JSON.stringify(userWithoutPassword));
+      console.log('تم تسجيل الدخول بنجاح:', userWithoutPassword);
       return userWithoutPassword;
     }
 
+    console.log('فشل تسجيل الدخول - بيانات غير صحيحة');
     throw new Error('الرقم الوظيفي أو كلمة المرور غير صحيحة');
+  }
+
+  // إضافة دالة لإعادة تعيين البيانات يدوياً
+  resetUsers() {
+    this.initializeUsers();
+    return JSON.parse(localStorage.getItem('users') || '[]');
   }
 
   logout() {

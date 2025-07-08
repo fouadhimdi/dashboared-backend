@@ -19,9 +19,6 @@ app.use(express.json());
 // تقديم الملفات الثابتة من مجلد public
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// API prefix للمسارات
-const API_PREFIX = '/api';
-
 // دالة موحدة للوصول إلى المجلدات وقراءة محتوياتها
 function readDirectoryHandler(dirName) {
   return (req, res) => {
@@ -41,12 +38,34 @@ function readDirectoryHandler(dirName) {
 
 const validFolders = ['ED', 'LAB', 'BB', 'OR', 'RAD'];
 
-// مسارات API للوصول إلى المجلدات الثابتة والديناميكية
+// مسارات API مع prefix /api
 validFolders.forEach(folder => {
-  app.get(`${API_PREFIX}/data/${folder}`, readDirectoryHandler(folder));
+  app.get(`/api/data/${folder}`, readDirectoryHandler(folder));
 });
 
-app.get(`${API_PREFIX}/data/:folderName/:fileName`, (req, res) => {
+// مسارات API بدون prefix للتوافق مع النسخة القديمة
+validFolders.forEach(folder => {
+  app.get(`/data/${folder}`, readDirectoryHandler(folder));
+});
+
+// مسارات تحميل الملفات مع prefix /api
+app.get(`/api/data/:folderName/:fileName`, (req, res) => {
+  const { folderName, fileName } = req.params;
+
+  if (!validFolders.includes(folderName)) {
+    return res.status(403).send({ message: 'Access denied: Invalid folder' });
+  }
+
+  const filePath = path.join(__dirname, `public/data/${folderName}/${fileName}`);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      res.status(404).send({ message: `File not found: ${fileName}` });
+    }
+  });
+});
+
+// مسارات تحميل الملفات بدون prefix للتوافق مع النسخة القديمة
+app.get(`/data/:folderName/:fileName`, (req, res) => {
   const { folderName, fileName } = req.params;
 
   if (!validFolders.includes(folderName)) {
@@ -74,7 +93,7 @@ if (fs.existsSync(buildPath)) {
   // Catch all handler لـ React Router
   app.get('*', (req, res) => {
     // تجنب API routes
-    if (req.path.startsWith(API_PREFIX)) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/data')) {
       return res.status(404).json({ message: 'API endpoint not found' });
     }
     res.sendFile(path.join(buildPath, 'index.html'));
@@ -96,6 +115,8 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server is running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📁 Serving files from: ${buildPath}`);
+  console.log(`🔗 Available at: http://localhost:${PORT}`);
   if (process.env.NODE_ENV === 'production') {
     console.log(`🚀 Production server ready!`);
   }
