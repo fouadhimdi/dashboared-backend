@@ -73,6 +73,15 @@ app.get('/data/:folderName/:fileName', (req, res) => {
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3001;
+// تقديم تطبيق React من مجلد build في الإنتاج
+const buildPath = path.join(__dirname, 'build');
+if (fs.existsSync(buildPath)) {
+  app.use(express.static(buildPath));
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(buildPath, 'index.html'));
+  });
+}
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
