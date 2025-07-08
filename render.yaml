@@ -2,8 +2,16 @@ services:
   - type: web
     name: ed-dashboard
     env: node
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 10000
+    healthCheckPath: /
+    disk:
+      name: ed-dashboard-disk
+      mountPath: /opt/render/project/src/public/data
+      sizeGB: 1

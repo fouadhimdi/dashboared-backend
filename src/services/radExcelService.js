@@ -1,11 +1,18 @@
 import * as XLSX from 'xlsx';
 
+// قاعدة URL للـ API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
+
 // خدمة متخصصة لقراءة وتحليل بيانات الأشعة من ملفات Excel
 const RadExcelService = {
   // دالة للحصول على قائمة ملفات قسم الأشعة
   async getRadFileList() {
     try {
-      const response = await fetch('http://localhost:3001/data/RAD');
+      const response = await fetch(`${API_BASE_URL}/data/RAD`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const files = await response.json();
       return files.filter(file => file.endsWith('.xlsx'));
     } catch (error) {
@@ -17,7 +24,10 @@ const RadExcelService = {
   // دالة لقراءة ملف Excel محدد لقسم الأشعة
   async readRadExcelFile(fileName) {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/RAD/${fileName}`);
+      const response = await fetch(`${API_BASE_URL}/data/RAD/${fileName}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const fileContent = await response.arrayBuffer();
       const workbook = XLSX.read(fileContent, { 
         type: 'array',

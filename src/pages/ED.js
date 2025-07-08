@@ -5,6 +5,10 @@ import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// قاعدة URL للـ API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
+
 // Helper functions to replace excelAnalyticsService
 const generatePlaceholderData = (count, min, max, customLabels = null) => {
   const data = Array.from({ length: count }, () => Math.floor(Math.random() * (max - min + 1) + min));
@@ -247,7 +251,10 @@ const ED = () => {
   useEffect(() => {
     const fetchExcelFiles = async () => {
       try {
-        const response = await fetch('http://localhost:3001/data/ED');
+        const response = await fetch(`${API_BASE_URL}/data/ED`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const files = await response.json();
         const excelFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
         setExcelFiles(excelFiles);
@@ -274,7 +281,10 @@ const ED = () => {
         setLoading(true);
         setError('');
         
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/data/ED/${selectedFile}`);
+        const response = await fetch(`${API_BASE_URL}/data/ED/${selectedFile}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const fileContent = await response.arrayBuffer();
         const workbook = XLSX.read(fileContent, { type: 'array' });
         

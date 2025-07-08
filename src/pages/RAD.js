@@ -4,6 +4,10 @@ import Sidebar from '../components/layout/Sidebar';
 import TimeComparisonChart from '../components/charts/TimeComparisonChart';
 import ComparativeBarChart from '../components/charts/ComparativeBarChart';
 
+// قاعدة URL للـ API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
+
 // دوال بديلة لتوليد بيانات مؤقتة للرسوم البيانية
 const generatePlaceholderData = (count, min, max, customLabels = null) => {
   const data = Array.from({ length: count }, () => Math.floor(Math.random() * (max - min + 1) + min));
@@ -151,7 +155,10 @@ const RAD = () => {
   const loadExcelFiles = async () => {
     try {
       // محاولة جلب قائمة الملفات من نقطة النهاية API
-      const response = await fetch('http://localhost:3001/data/RAD');
+      const response = await fetch(`${API_BASE_URL}/data/RAD`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const files = await response.json();
       
       // ترتيب الملفات حسب التاريخ من الأقدم إلى الأحدث
@@ -159,22 +166,11 @@ const RAD = () => {
       
       setExcelFiles(excelFiles);
       
-      // اختيار أحدث ملف افتراضيًا
-      if (excelFiles.length > 0) {
+      if (excelFiles.length > 0 && !selectedFile) {
         setSelectedFile(excelFiles[0]);
-        loadExcelData(excelFiles[0]);
-      } else {
-        setError('لا توجد ملفات بيانات متاحة');
-        setLoading(false);
-        
-        // في حالة عدم وجود ملفات، استخدم قائمة ثابتة كبديل
-        const mockFiles = ["RAD-JD-GEN-4-2025-JAN.xlsx", "RAD-JD-GEN-4-2025-FEB.xlsx", "RAD-JD-GEN-4-2025-MAR.xlsx"].sort(compareDates);
-        setExcelFiles(mockFiles);
-        setSelectedFile(mockFiles[0]);
-        loadExcelData(mockFiles[0]);
       }
-    } catch (err) {
-      console.error('Error loading Excel files:', err);
+    } catch (error) {
+      console.error('خطأ في تحميل قائمة الملفات:', error);
       setError('حدث خطأ أثناء تحميل قائمة الملفات');
       setLoading(false);
       
@@ -192,9 +188,9 @@ const RAD = () => {
       setLoading(true);
       setError('');
       
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/RAD/${filePath}`);
+      const response = await fetch(`${API_BASE_URL}/data/RAD/${filePath}`);
       if (!response.ok) {
-        throw new Error('فشل في تحميل بيانات الملف');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const fileContent = await response.arrayBuffer();
@@ -262,8 +258,8 @@ const RAD = () => {
       
       setKpiValues(extractedKpis);
       setLoading(false);
-    } catch (err) {
-      console.error('Error loading Excel data:', err);
+    } catch (error) {
+      console.error('Error loading Excel data:', error);
       setError('حدث خطأ أثناء تحميل بيانات الملف');
       setLoading(false);
       
@@ -644,6 +640,7 @@ const RAD = () => {
                             </div>
                           </div>
                           
+
                           {/* زمن انتظار المنومين (CT) */}
                           <div className="bg-white rounded-lg shadow-sm p-2 border-r-3 border-indigo-500 transform transition-transform hover:scale-105 hover:shadow-md">
                             <div className="flex justify-between">

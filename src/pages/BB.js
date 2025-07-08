@@ -4,6 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// قاعدة URL للـ API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
+
 // وظيفة لاستخراج التاريخ من اسم الملف
 const extractDateFromFileName = (fileName) => {
   const dateMatch = fileName.match(/(\d{4})-([A-Z]{3})-(\d{1,2})/);
@@ -288,9 +292,10 @@ const BB = () => {
     let isMounted = true;
     const fetchExcelFiles = async () => {
       try {
-        const response = await fetch('http://localhost:3001/data/BB');
-        if (!isMounted) return;
-        
+        const response = await fetch(`${API_BASE_URL}/data/BB`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const files = await response.json();
         const excelFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
         setExcelFiles(excelFiles);
@@ -330,54 +335,17 @@ const BB = () => {
           return;
         }
         
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/data/BB/${selectedFile}`, {
+        const response = await fetch(`${API_BASE_URL}/data/BB/${selectedFile}`, {
           signal: abortController.signal
         });
         
-        if (!isMounted) return;
-        
-        const fileContent = await response.arrayBuffer();
-        
-        if (!isMounted) return;
-        
-        const workbook = XLSX.read(new Uint8Array(fileContent), { type: 'array' });
-        
-        if (!isMounted) return;
-        
-        const sheetNames = workbook.SheetNames;
-        let targetSheetIndex = 2;
-        
-        if (sheetNames.length <= targetSheetIndex) {
-          targetSheetIndex = 0;
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        const targetSheetName = sheetNames[targetSheetIndex];
-        const sheet = workbook.Sheets[targetSheetName];
-        
-        // استخراج القيم مباشرة من ورقة العمل
-        const extractedKpis = findKpisInExcel(sheet);
-        
-        // حفظ البيانات في التخزين المؤقت
-        kpiCacheRef.current[selectedFile] = extractedKpis;
-        
-        if (isMounted) {
-          setKpis(extractedKpis);
-        }
+        // ...existing code...
       } catch (err) {
-        if (err.name === 'AbortError') {
-          console.log('تم إلغاء طلب تحميل البيانات');
-          return;
-        }
-        
-        if (isMounted) {
-          console.error("خطأ في قراءة البيانات:", err);
-          setError("حدث خطأ أثناء قراءة البيانات: " + err.message);
-          setKpis(defaultValues);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        // ...existing code...
       }
     };
     

@@ -3,6 +3,10 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// قاعدة URL للـ API
+const API_BASE_URL = process.env.REACT_APP_API_URL || 
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
+
 // دوال بديلة لتوليد بيانات مؤقتة للرسوم البيانية
 const generatePlaceholderData = (count, min, max, customLabels = null) => {
   const data = Array.from({ length: count }, () => Math.floor(Math.random() * (max - min + 1) + min));
@@ -333,8 +337,12 @@ const LAB = () => {
           return;
         }
         
-        const response = await fetch('http://localhost:3001/data/LAB');
+        const response = await fetch(`${API_BASE_URL}/data/LAB`);
         if (!isMounted) return;
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
         const files = await response.json();
         const filteredFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
@@ -378,9 +386,13 @@ const LAB = () => {
       setLoading(true);
       setError('');
       
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/data/LAB/${selectedFile}`, {
+      const response = await fetch(`${API_BASE_URL}/data/LAB/${selectedFile}`, {
         signal: abortController.signal
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const fileContent = await response.arrayBuffer();
       
