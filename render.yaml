@@ -3,14 +3,16 @@ services:
     name: ed-dashboard
     env: node
     plan: free
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: npm run render-build
+    startCommand: npm run render-start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
-    healthCheckPath: /
+      - key: REACT_APP_API_URL
+        value: /api
+    healthCheckPath: /health
     disk:
       name: ed-dashboard-disk
       mountPath: /opt/render/project/src/public/data

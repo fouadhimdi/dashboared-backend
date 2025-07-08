@@ -33,7 +33,9 @@
     "client": "react-scripts start",
     "server": "node server.js",
     "predeploy": "npm run build",
-    "deploy": "npm run build && npm start"
+    "deploy": "npm run build && npm start",
+    "render-build": "npm install && npm run build",
+    "render-start": "npm start"
   },
   "eslintConfig": {
     "extends": [
