@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/authService';
@@ -61,15 +61,17 @@ const compareDates = (fileA, fileB) => {
 };
 
 const ED = () => {
-  const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tableData, setTableData] = useState([]);
   const [excelFiles, setExcelFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
-  const [currentPage, setCurrentPage] = useState('emergency');
+  const [tableData, setTableData] = useState({ headers: [], rows: [] });
+  const [processingProgress, setProcessingProgress] = useState(0);
   
+  // تخزين مؤقت محسن
+  const dataCache = useRef(new Map());
+
   // البنش مارك لكل مؤشر
   const benchmarks = {
     // KPI 1: Door to Doctor (بالدقائق)
@@ -450,13 +452,23 @@ const ED = () => {
         {/* استخدام مكون الشريط الجانبي الموحد */}
         <Sidebar menuItems={menuItems} />
 
-        {/* المحتوى الرئيسي - تعديل الهوامش لتجنب التداخل مع الشريط الجانبي */}
-        <div className="flex-1 overflow-auto bg-gray-50 mr-72">
-          {/* رأس الصفحة */}
+        {/* المحتوى الرئيسي - محسن للجوال */}
+        <div className="flex-1 overflow-auto bg-gray-50 mr-0 lg:mr-72">
+          {/* شريط التقدم */}
+          {processingProgress > 0 && processingProgress < 100 && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-green-500 h-1">
+              <div 
+                className="h-full bg-green-600 transition-all duration-300"
+                style={{ width: `${processingProgress}%` }}
+              ></div>
+            </div>
+          )}
+          
+          {/* رأس الصفحة - محسن للجوال */}
           <div className="sticky top-0 z-10 bg-white shadow-sm border-b border-gray-200">
-            <div className="px-4 py-2 flex justify-between items-center">
+            <div className="px-2 sm:px-4 py-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <div>
-                <h1 className="text-xl font-bold text-gray-800">لوحة تحكم بيانات أقسام الطوارئ</h1>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-800">لوحة تحكم بيانات أقسام الطوارئ</h1>
                 {selectedFile && (
                   <div className="text-xs text-gray-500 mt-0.5">
                     {getSelectedFileDate() ? `بيانات ${getSelectedFileDate()}` : selectedFile}
@@ -464,17 +476,17 @@ const ED = () => {
                 )}
               </div>
               
-              <div className="flex items-center">
-                <div className="relative mr-4">
+              <div className="flex items-center w-full sm:w-auto">
+                <div className="relative flex-1 sm:flex-none mr-2 sm:mr-4">
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </div>
                   <select
                     value={selectedFile}
                     onChange={(e) => setSelectedFile(e.target.value)}
-                    className="block w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
+                    className="block w-full sm:w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
                   >
                     <option value="">اختر ملف Excel</option>
                     {excelFiles.map((file, index) => (
@@ -488,85 +500,85 @@ const ED = () => {
             </div>
           </div>
           
-          <div className="p-4">
+          <div className="p-2 sm:p-4">
             <div className="w-full mx-auto">
-              {/* القسم الرئيسي - ملخص المؤشرات */}
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 mb-4">
-                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-indigo-500 transform transition-transform hover:scale-105 hover:shadow-md">
+              {/* القسم الرئيسي - ملخص المؤشرات - محسن للجوال */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-4">
+                <div className="bg-white rounded-lg shadow-sm p-2 sm:p-3 border-r-4 border-indigo-500 transform transition-transform hover:scale-105 hover:shadow-md">
                   <div className="flex justify-between">
                     <div>
                       <p className="text-xs font-medium text-gray-500">إجمالي المرضى</p>
-                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                      <p className="text-sm sm:text-lg font-bold text-gray-800 mt-0.5">
                         {tableData.rows && tableData.rows[5] && tableData.rows[5][12] ? tableData.rows[5][12] : '-'}
                       </p>
                     </div>
-                    <div className="p-2 bg-indigo-100 rounded-lg">
-                      <svg className="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <div className="p-1 sm:p-2 bg-indigo-100 rounded-lg">
+                      <svg className="w-4 h-4 sm:w-6 sm:h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                       </svg>
                     </div>
                   </div>
-                  <div className="mt-2 text-[10px] text-gray-500">
+                  <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] text-gray-500">
                     مقارنة بالشهر السابق
                     <span className="text-green-500 font-medium mr-1">↑ 12%</span>
                   </div>
                 </div>
                 
-                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-blue-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                <div className="bg-white rounded-lg shadow-sm p-2 sm:p-3 border-r-4 border-green-500 transform transition-transform hover:scale-105 hover:shadow-md">
                   <div className="flex justify-between">
                     <div>
-                      <p className="text-xs font-medium text-gray-500">وقت الانتظار للطبيب</p>
-                      <p className="text-lg font-bold text-gray-800 mt-0.5">
-                        {tableData.rows && tableData.rows[0] && tableData.rows[0][1] ? tableData.rows[0][1] : '-'}
-                      </p>
-                    </div>
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-[10px] text-gray-500">
-                    الهدف الأمثل
-                    <span className="text-indigo-600 font-medium mr-1">أقل من 10 دقائق</span>
-                  </div>
-                </div>
-                
-                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-green-500 transform transition-transform hover:scale-105 hover:shadow-md">
-                  <div className="flex justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-gray-500">نسبة الإستجابة خلال 4 ساعات</p>
-                      <p className="text-lg font-bold text-gray-800 mt-0.5">
+                      <p className="text-xs font-medium text-gray-500">مرضى تم علاجهم</p>
+                      <p className="text-sm sm:text-lg font-bold text-gray-800 mt-0.5">
                         {tableData.rows && tableData.rows[5] && tableData.rows[5][13] ? tableData.rows[5][13] : '-'}
                       </p>
                     </div>
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <div className="p-1 sm:p-2 bg-green-100 rounded-lg">
+                      <svg className="w-4 h-4 sm:w-6 sm:h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     </div>
                   </div>
-                  <div className="mt-2 text-[10px] text-gray-500">
+                  <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] text-gray-500">
                     الهدف الأمثل
-                    <span className="text-green-600 font-medium mr-1">أكثر من 95%</span>
+                    <span className="text-indigo-600 font-medium mr-1">أكثر من 95%</span>
                   </div>
                 </div>
                 
-                <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-red-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                <div className="bg-white rounded-lg shadow-sm p-2 sm:p-3 border-r-4 border-yellow-500 transform transition-transform hover:scale-105 hover:shadow-md">
                   <div className="flex justify-between">
                     <div>
-                      <p className="text-xs font-medium text-gray-500">معدل الوفيات</p>
-                      <p className="text-lg font-bold text-gray-800 mt-0.5">
-                        {tableData.rows && tableData.rows[5] && tableData.rows[5][17] ? tableData.rows[5][17] : '-'}
+                      <p className="text-xs font-medium text-gray-500">متوسط وقت الانتظار</p>
+                      <p className="text-sm sm:text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[5] && tableData.rows[5][14] ? tableData.rows[5][14] : '-'}
                       </p>
                     </div>
-                    <div className="p-2 bg-red-100 rounded-lg">
-                      <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <div className="p-1 sm:p-2 bg-yellow-100 rounded-lg">
+                      <svg className="w-4 h-4 sm:w-6 sm:h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] text-gray-500">
+                    الهدف الأمثل
+                    <span className="text-indigo-600 font-medium mr-1">أقل من 30 دقيقة</span>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-lg shadow-sm p-2 sm:p-3 border-r-4 border-red-500 transform transition-transform hover:scale-105 hover:shadow-md">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">حالات حرجة</p>
+                      <p className="text-sm sm:text-lg font-bold text-gray-800 mt-0.5">
+                        {tableData.rows && tableData.rows[5] && tableData.rows[5][15] ? tableData.rows[5][15] : '-'}
+                      </p>
+                    </div>
+                    <div className="p-1 sm:p-2 bg-red-100 rounded-lg">
+                      <svg className="w-4 h-4 sm:w-6 sm:h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                     </div>
                   </div>
-                  <div className="mt-2 text-[10px] text-gray-500">
+                  <div className="mt-1 sm:mt-2 text-[9px] sm:text-[10px] text-gray-500">
                     الهدف الأمثل
                     <span className="text-indigo-600 font-medium mr-1">أقل من 1%</span>
                   </div>
@@ -575,11 +587,14 @@ const ED = () => {
               
               {loading ? (
                 <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
-                  <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-sm text-gray-600 mt-2">جاري تحميل البيانات...</p>
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-2">جاري تحميل البيانات...</p>
+                  {processingProgress > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">{Math.round(processingProgress)}%</p>
+                  )}
                 </div>
               ) : error ? (
-                <div className="bg-red-50 border-r-4 border-red-500 p-3 rounded-lg shadow-sm">
+                <div className="bg-red-50 border-r-4 border-red-500 p-3 rounded-lg">
                   <div className="flex">
                     <div className="flex-shrink-0 mr-3">
                       <svg className="h-4 w-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
@@ -592,23 +607,24 @@ const ED = () => {
                   </div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <div className="bg-white rounded-lg shadow-sm overflow-hidden transition-shadow duration-300 hover:shadow-md mb-4">
-                    <div className="px-4 py-2 border-b border-gray-200 bg-gradient-to-r from-indigo-500 to-purple-600">
-                      <h2 className="text-base font-bold text-white text-center">مؤشرات الأداء الرئيسية (KPIs)</h2>
-                    </div>
-                    
-                    <div className="overflow-x-auto">
+                <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-gray-200">
+                    <h3 className="text-sm sm:text-base font-semibold text-gray-800">تفاصيل مؤشرات الأداء</h3>
+                  </div>
+                  
+                  {/* الجدول - محسن للجوال */}
+                  <div className="overflow-x-auto">
+                    <div className="min-w-full">
                       <table className="min-w-full divide-y divide-gray-200">
-                        <thead>
-                          <tr className="bg-gradient-to-r from-gray-50 to-gray-100">
-                            {tableData.headers && tableData.headers.map((header, index) => (
-                              <th 
-                                key={index} 
-                                className="sticky top-0 px-2 py-2 text-center text-[10px] font-medium text-gray-600 uppercase tracking-wider border-b border-gray-200"
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {tableData.headers.map((header, index) => (
+                              <th
+                                key={index}
+                                className="sticky top-0 px-1 sm:px-2 py-2 text-center text-[8px] sm:text-[10px] font-medium text-gray-600 uppercase tracking-wider border-b border-gray-200"
                                 style={{
-                                  minWidth: index === 0 ? '50px' : '85px',
-                                  maxWidth: index === 0 ? '60px' : '110px',
+                                  minWidth: index === 0 ? '40px' : '60px',
+                                  maxWidth: index === 0 ? '50px' : '90px',
                                   whiteSpace: 'pre-wrap',
                                   wordBreak: 'break-word',
                                   lineHeight: '1.1'
@@ -630,20 +646,20 @@ const ED = () => {
                                 return (
                                   <td 
                                     key={cellIndex} 
-                                    className="relative px-2 py-1.5 text-center text-xs font-medium"
+                                    className="relative px-1 sm:px-2 py-1 sm:py-1.5 text-center text-[8px] sm:text-xs font-medium"
                                   >
                                     <div 
                                       className={`relative p-1 rounded-md shadow-sm transition-all duration-200 ${backgroundColor ? 'transform hover:scale-105' : ''}`}
                                       style={{ 
                                         backgroundColor: backgroundColor || 'transparent',
                                         color: backgroundColor ? 'white' : 'rgb(17 24 39)',
-                                        maxWidth: cellIndex === 0 ? '50px' : '100px',
+                                        maxWidth: cellIndex === 0 ? '40px' : '80px',
                                         margin: '0 auto'
                                       }}
                                     >
-                                      <div className="font-semibold text-xs">{cell}</div>
+                                      <div className="font-semibold text-[8px] sm:text-xs">{cell}</div>
                                       {benchmarkLabel && (
-                                        <div className="text-[9px] opacity-80 font-normal">{benchmarkLabel}</div>
+                                        <div className="text-[7px] sm:text-[9px] opacity-80 font-normal">{benchmarkLabel}</div>
                                       )}
                                     </div>
                                   </td>
@@ -655,27 +671,28 @@ const ED = () => {
                       </table>
                     </div>
                     
-                    <div className="px-4 py-1.5 bg-gray-50 border-t border-gray-200">
+                    {/* مؤشرات الألوان - محسن للجوال */}
+                    <div className="px-2 sm:px-4 py-1 sm:py-1.5 bg-gray-50 border-t border-gray-200">
                       <div className="flex justify-between items-center">
-                        <div className="text-[9px] text-gray-500">
+                        <div className="text-[8px] sm:text-[9px] text-gray-500">
                           تم التحديث: {new Date().toLocaleDateString('ar-SA')}
                         </div>
-                        <div className="flex space-x-1 space-x-reverse">
-                          <div className="flex items-center ml-2">
-                            <div className="w-2 h-2 rounded-full bg-[#0072C6] mr-1"></div>
-                            <span className="text-[9px] text-gray-600">ممتاز</span>
-                          </div>
-                          <div className="flex items-center ml-2">
-                            <div className="w-2 h-2 rounded-full bg-[#00B050] mr-1"></div>
-                            <span className="text-[9px] text-gray-600">جيد</span>
-                          </div>
-                          <div className="flex items-center ml-2">
-                            <div className="w-2 h-2 rounded-full bg-[#FFC000] mr-1"></div>
-                            <span className="text-[9px] text-gray-600">يحتاج تحسين</span>
+                        <div className="flex flex-wrap gap-1 sm:gap-2">
+                          <div className="flex items-center">
+                            <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#0072C6] mr-1"></div>
+                            <span className="text-[8px] sm:text-[9px] text-gray-600">ممتاز</span>
                           </div>
                           <div className="flex items-center">
-                            <div className="w-2 h-2 rounded-full bg-[#C00000] mr-1"></div>
-                            <span className="text-[9px] text-gray-600">غير مقبول</span>
+                            <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#00B050] mr-1"></div>
+                            <span className="text-[8px] sm:text-[9px] text-gray-600">جيد</span>
+                          </div>
+                          <div className="flex items-center">
+                            <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#FFC000] mr-1"></div>
+                            <span className="text-[8px] sm:text-[9px] text-gray-600">يحتاج تحسين</span>
+                          </div>
+                          <div className="flex items-center">
+                            <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#C00000] mr-1"></div>
+                            <span className="text-[8px] sm:text-[9px] text-gray-600">غير مقبول</span>
                           </div>
                         </div>
                       </div>
@@ -685,7 +702,7 @@ const ED = () => {
               )}
               
               {/* حقوق الملكية */}
-              <div className="mt-2 text-center text-xs text-gray-500">
+              <div className="mt-2 text-center text-[9px] sm:text-xs text-gray-500">
                 <p>© {String(new Date().getFullYear())} قسم الطوارئ - جميع الحقوق محفوظة</p>
               </div>
             </div>

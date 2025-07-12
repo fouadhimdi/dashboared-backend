@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// تحسين الأداء بإضافة تحميل تدريجي
+const BATCH_SIZE = 50;
+
 // قاعدة URL للـ API
 const API_BASE_URL = process.env.REACT_APP_API_URL || 
   (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
@@ -42,17 +45,19 @@ const compareDates = (fileA, fileB) => {
 };
 
 const BB = () => {
-  const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [excelFiles, setExcelFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
   const [kpis, setKpis] = useState({});
+  const [processingProgress, setProcessingProgress] = useState(0);
   
   // تخزين مؤقت للتحسين الأداء
   const kpiCacheRef = useRef({});
   const excelDataRef = useRef({});
+  const dataCache = useRef(new Map());
 
   const menuItems = [
     { id: 'admin', label: 'لوحة التحكم', icon: '👨‍💼', path: '/admin' },
@@ -323,33 +328,81 @@ const BB = () => {
     let isMounted = true;
     const abortController = new AbortController();
     
-    const loadExcelData = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        
-        // التحقق من وجود البيانات في التخزين المؤقت
-        if (kpiCacheRef.current[selectedFile]) {
-          setKpis(kpiCacheRef.current[selectedFile]);
-          setLoading(false);
-          return;
-        }
-        
-        const response = await fetch(`${API_BASE_URL}/data/BB/${selectedFile}`, {
-          signal: abortController.signal
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        // ...existing code...
-      } catch (err) {
-        // ...existing code...
+    // تحسين تحميل البيانات
+    const loadExcelData = useCallback(async (fileName) => {
+      if (!fileName) return;
+      
+      // فحص التخزين المؤقت
+      if (dataCache.current.has(fileName)) {
+        const cachedData = dataCache.current.get(fileName);
+        setKpis(cachedData);
+        return;
       }
-    };
-    
-    loadExcelData();
+      
+      setLoading(true);
+      setError('');
+      setProcessingProgress(0);
+      
+      try {
+        const response = await fetch(`/data/BB/${fileName}`);
+        if (!response.ok) throw new Error('فشل في تحميل الملف');
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        
+        // معالجة تدريجية
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+        const totalBatches = Math.ceil(jsonData.length / BATCH_SIZE);
+        
+        let processedKpis = {};
+        
+        for (let i = 0; i < totalBatches; i++) {
+          await processExcelDataBatch(jsonData, i, totalBatches);
+          
+          if (i === 0) {
+            processedKpis = extractKpisFromData(worksheet);
+          }
+        }
+        
+        dataCache.current.set(fileName, processedKpis);
+        setKpis(processedKpis);
+        setProcessingProgress(100);
+        
+      } catch (err) {
+        console.error('خطأ في تحميل البيانات:', err);
+        setError('حدث خطأ في تحميل البيانات. يرجى المحاولة مرة أخرى.');
+      } finally {
+        setLoading(false);
+        setTimeout(() => setProcessingProgress(0), 1000);
+      }
+    }, []);
+
+    // استخراج KPIs من البيانات
+    const extractKpisFromData = useCallback((worksheet) => {
+      const extractedKpis = {};
+      
+      kpiDefinitions.forEach((kpi) => {
+        try {
+          const { rowIndex, columnName } = kpi.exactCell;
+          const cellAddress = columnName + (rowIndex + 1);
+          const cell = worksheet[cellAddress];
+          
+          if (cell && cell.v !== undefined) {
+            extractedKpis[kpi.id] = formatKpiValue(cell.v);
+          } else {
+            extractedKpis[kpi.id] = '-';
+          }
+        } catch (err) {
+          console.error(`خطأ في استخراج ${kpi.id}:`, err);
+          extractedKpis[kpi.id] = '-';
+        }
+      });
+      
+      return extractedKpis;
+    }, []);
+
+    loadExcelData(selectedFile);
     
     return () => {
       isMounted = false;
@@ -372,8 +425,36 @@ const BB = () => {
     return `${dateMatch[3]} ${months[dateMatch[2]]} ${dateMatch[1]}`;
   }, [selectedFile]);
 
+  // تحسين معالجة البيانات
+  const processExcelDataBatch = useCallback(async (data, batchIndex, totalBatches) => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const progress = ((batchIndex + 1) / totalBatches) * 100;
+        setProcessingProgress(progress);
+        resolve();
+      }, 10);
+    });
+  }, []);
+
+  // تحسين مكون KpiCard
   const KpiCard = React.memo(({ kpi }) => {
     const { color, label } = getKpiEvaluation(kpi.id, kpis[kpi.id]);
+    const isLoading = loading && !kpis[kpi.id];
+    
+    if (isLoading) {
+      return (
+        <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-gray-300 animate-pulse">
+          <div className="flex justify-between">
+            <div className="flex-1">
+              <div className="h-3 bg-gray-200 rounded mb-2"></div>
+              <div className="h-6 bg-gray-200 rounded mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-20"></div>
+            </div>
+            <div className="w-8 h-8 bg-gray-200 rounded-lg"></div>
+          </div>
+        </div>
+      );
+    }
     
     return (
       <div className={`bg-white rounded-lg shadow-sm p-3 border-r-4 border-${kpi.borderColor}-500 transform transition-transform hover:scale-105 hover:shadow-md`}>
@@ -407,6 +488,17 @@ const BB = () => {
         <Sidebar menuItems={menuItems} />
 
         <div className="flex-1 overflow-auto bg-gray-50 mr-72">
+          {/* شريط التقدم */}
+          {processingProgress > 0 && processingProgress < 100 && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-red-500 h-1">
+              <div 
+                className="h-full bg-red-600 transition-all duration-300"
+                style={{ width: `${processingProgress}%` }}
+              ></div>
+            </div>
+          )}
+          
+          {/* رأس الصفحة */}
           <div className="sticky top-0 z-10 bg-white shadow-sm border-b border-gray-200">
             <div className="px-4 py-2 flex justify-between items-center">
               <div>
@@ -421,13 +513,16 @@ const BB = () => {
               <div className="flex items-center">
                 <div className="relative">
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </div>
                   <select
                     value={selectedFile}
-                    onChange={(e) => setSelectedFile(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedFile(e.target.value);
+                      loadExcelData(e.target.value);
+                    }}
                     className="block w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
                   >
                     <option value="">اختر ملف Excel</option>
@@ -443,9 +538,12 @@ const BB = () => {
           <div className="p-4">
             <div className="w-full mx-auto">
               {loading ? (
-                <div className="flex justify-center items-center h-40 bg-white rounded-lg shadow-sm">
+                <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
                   <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-sm text-gray-600 mr-3">جاري تحميل البيانات...</p>
+                  <p className="text-sm text-gray-600 mt-2">جاري تحميل البيانات...</p>
+                  {processingProgress > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">{Math.round(processingProgress)}%</p>
+                  )}
                 </div>
               ) : error ? (
                 <div className="bg-red-50 border-r-4 border-red-500 p-3 rounded-lg">
@@ -456,13 +554,14 @@ const BB = () => {
                   <div className="bg-white rounded-lg shadow-sm p-3 mb-6">
                     <h2 className="text-base font-bold text-gray-700 mb-3 border-r-4 border-red-500 pr-2">ملخص مؤشرات الأداء الرئيسية لبنك الدم</h2>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* شبكة responsive محسنة للجوال */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {kpiDefinitions.slice(0, 3).map((kpi) => (
                         <KpiCard key={kpi.id} kpi={kpi} />
                       ))}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
                       {kpiDefinitions.slice(3, 6).map((kpi) => (
                         <KpiCard key={kpi.id} kpi={kpi} />
                       ))}

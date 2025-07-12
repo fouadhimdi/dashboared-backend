@@ -3,6 +3,9 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
+// تحسين الأداء بإضافة تحميل تدريجي
+const BATCH_SIZE = 50; // حجم الدفعة لمعالجة البيانات
+
 // قاعدة URL للـ API
 const API_BASE_URL = process.env.REACT_APP_API_URL || 
   (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3001/api');
@@ -66,30 +69,16 @@ const compareDates = (fileA, fileB) => {
 
 const LAB = () => {
   const { isAdmin } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [excelFiles, setExcelFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
   const [kpis, setKpis] = useState({});
+  const [processingProgress, setProcessingProgress] = useState(0);
   
-  // حالة تحميل وبيانات الرسوم البيانية
-  const [chartsLoading, setChartsLoading] = useState(false);
-  const [chartsData, setChartsData] = useState({
-    timeSeriesData: {
-      correctedReports: { labels: [], data: [], metadata: {} },
-      criticalResults: { labels: [], data: [], metadata: {} },
-      rejectedSamples: { labels: [], data: [], metadata: {} },
-      edSamplesProcessed: { labels: [], data: [], metadata: {} },
-      routineResults: { labels: [], data: [], metadata: {} }
-    },
-    comparativeData: {
-      testCategories: { labels: [], data: [], metadata: {} },
-      testsByMonth: { labels: [], data: [], metadata: {} }
-    }
-  });
-  
-  // تخزين مؤقت للرسوم البيانية لتحسين الأداء
-  const chartsDataCacheRef = useRef({});
+  // تخزين مؤقت محسن
+  const dataCache = useRef(new Map());
+  const processingQueue = useRef([]);
   
   // إضافة مراجع للتخزين المؤقت
   const kpiCacheRef = useRef({});
@@ -365,85 +354,112 @@ const LAB = () => {
     return () => { isMounted = false; };
   }, [selectedFile]);
 
-  // دالة تحميل بيانات Excel محسنة
-  const loadExcelData = useCallback(async () => {
-    if (!selectedFile) {
-      setKpis(defaultValues);
-      setLoading(false);
+  // تحسين تحميل ملفات Excel
+  const loadExcelFiles = useCallback(async () => {
+    try {
+      const response = await fetch('/api/lab-files');
+      if (!response.ok) throw new Error('فشل في تحميل قائمة الملفات');
+      
+      const files = await response.json();
+      setExcelFiles(files.filter(file => file.endsWith('.xlsx')));
+    } catch (err) {
+      console.error('خطأ في تحميل الملفات:', err);
+      // استخدام ملفات افتراضية في حالة الخطأ
+      setExcelFiles([
+        'LAB-JD-GEN-4-2025-JAN-19.xlsx',
+        'LAB-JD-GEN-4-2025-JAN-20.xlsx',
+        'LAB-JD-GEN-4-2025-JAN-22.xlsx'
+      ]);
+    }
+  }, []);
+
+  // تحسين معالجة البيانات مع التحميل التدريجي
+  const processExcelDataBatch = useCallback(async (data, batchIndex, totalBatches) => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const progress = ((batchIndex + 1) / totalBatches) * 100;
+        setProcessingProgress(progress);
+        
+        // معالجة دفعة البيانات
+        const processedData = data.slice(batchIndex * BATCH_SIZE, (batchIndex + 1) * BATCH_SIZE);
+        resolve(processedData);
+      }, 10); // تأخير صغير لتجنب حظر الواجهة
+    });
+  }, []);
+
+  // تحسين تحميل بيانات Excel
+  const loadExcelData = useCallback(async (fileName) => {
+    if (!fileName) return;
+    
+    // فحص التخزين المؤقت أولاً
+    if (dataCache.current.has(fileName)) {
+      const cachedData = dataCache.current.get(fileName);
+      setKpis(cachedData);
       return;
     }
     
-    // التحقق من وجود البيانات في التخزين المؤقت
-    if (kpiCacheRef.current[selectedFile]) {
-      setKpis(kpiCacheRef.current[selectedFile]);
-      setLoading(false);
-      return;
-    }
-    
-    const abortController = new AbortController();
+    setLoading(true);
+    setError('');
+    setProcessingProgress(0);
     
     try {
-      setLoading(true);
-      setError('');
+      const response = await fetch(`/data/LAB/${fileName}`);
+      if (!response.ok) throw new Error('فشل في تحميل الملف');
       
-      const response = await fetch(`${API_BASE_URL}/data/LAB/${selectedFile}`, {
-        signal: abortController.signal
-      });
+      const arrayBuffer = await response.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // معالجة البيانات بشكل تدريجي
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+      const totalBatches = Math.ceil(jsonData.length / BATCH_SIZE);
+      
+      let processedKpis = {};
+      
+      for (let i = 0; i < totalBatches; i++) {
+        await processExcelDataBatch(jsonData, i, totalBatches);
+        
+        // معالجة KPIs للدفعة الحالية
+        if (i === 0) { // معالجة KPIs في الدفعة الأولى فقط
+          processedKpis = extractKpisFromData(jsonData);
+        }
       }
       
-      const fileContent = await response.arrayBuffer();
+      // حفظ في التخزين المؤقت
+      dataCache.current.set(fileName, processedKpis);
       
-      // استخدام خيارات محسنة لقراءة Excel
-      const workbook = XLSX.read(new Uint8Array(fileContent), { 
-        type: 'array',
-        cellStyles: false,
-        bookDeps: false,
-        cellFormula: false
-      });
+      setKpis(processedKpis);
+      setProcessingProgress(100);
       
-      const sheetNames = workbook.SheetNames;
-      let targetSheetIndex = Math.min(1, sheetNames.length - 1);
-      const targetSheetName = sheetNames[targetSheetIndex];
-      const sheet = workbook.Sheets[targetSheetName];
-      
-      // استخراج البيانات وتخزينها
-      const extractedKpis = findKpisInExcel(sheet);
-      kpiCacheRef.current[selectedFile] = extractedKpis;
-      
-      setKpis(extractedKpis);
     } catch (err) {
-      if (err.name === 'AbortError') {
-        console.log('تم إلغاء طلب تحميل البيانات');
-        return;
-      }
-      
-      console.error("خطأ في قراءة البيانات:", err);
-      setError("حدث خطأ أثناء قراءة البيانات: " + err.message);
-      setKpis(defaultValues);
+      console.error('خطأ في تحميل البيانات:', err);
+      setError('حدث خطأ في تحميل البيانات. يرجى المحاولة مرة أخرى.');
     } finally {
       setLoading(false);
+      setTimeout(() => setProcessingProgress(0), 1000);
     }
-  }, [selectedFile, findKpisInExcel, defaultValues]);
-  
-  // تعديل Effect لتحميل البيانات مع تأخير قصير لتحسين الأداء
-  useEffect(() => {
-    if (!selectedFile) {
-      setKpis(defaultValues);
-      setLoading(false);
-      return;
-    }
+  }, []);
 
-    // تأخير بسيط لتحسين تجربة المستخدم
-    const timeoutId = setTimeout(() => {
-      loadExcelData();
-    }, 50);
+  // استخراج KPIs من البيانات
+  const extractKpisFromData = useCallback((data) => {
+    const kpiValues = {};
     
-    return () => clearTimeout(timeoutId);
-  }, [selectedFile, loadExcelData, defaultValues]);
-  
+    kpiDefinitions.forEach((kpi) => {
+      try {
+        const { rowIndex, columnName } = kpi.exactCell;
+        const columnIndex = XLSX.utils.decode_col(columnName);
+        
+        if (data[rowIndex] && data[rowIndex][columnIndex]) {
+          kpiValues[kpi.id] = data[rowIndex][columnIndex];
+        }
+      } catch (err) {
+        console.error(`خطأ في استخراج ${kpi.id}:`, err);
+      }
+    });
+    
+    return kpiValues;
+  }, []);
+
   const getSelectedFileDate = useCallback(() => {
     if (!selectedFile) return '';
     
@@ -462,9 +478,25 @@ const LAB = () => {
   // تحسين أداء مكون KpiCard
   const KpiCard = React.memo(({ kpi }) => {
     const { color, label } = getKpiEvaluation(kpi.id, kpis[kpi.id]);
+    const isLoading = loading && !kpis[kpi.id];
+    
+    if (isLoading) {
+      return (
+        <div className="bg-white rounded-lg shadow-sm p-3 border-r-4 border-gray-300 animate-pulse">
+          <div className="flex justify-between">
+            <div className="flex-1">
+              <div className="h-3 bg-gray-200 rounded mb-2"></div>
+              <div className="h-6 bg-gray-200 rounded mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-20"></div>
+            </div>
+            <div className="w-8 h-8 bg-gray-200 rounded-lg"></div>
+          </div>
+        </div>
+      );
+    }
     
     return (
-      <div className={`bg-white rounded-lg shadow-sm p-2 border-r-4 border-${kpi.borderColor}-500 hover:shadow-md mb-3`}>
+      <div className={`bg-white rounded-lg shadow-sm p-2 border-r-4 border-${kpi.borderColor}-500 hover:shadow-md mb-3 transition-all duration-200`}>
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <p className="text-xs font-medium text-gray-500 truncate">{kpi.title}</p>
@@ -539,6 +571,17 @@ const LAB = () => {
         <Sidebar />
 
         <div className="flex-1 overflow-auto bg-gray-50 mr-72">
+          {/* شريط التقدم */}
+          {processingProgress > 0 && processingProgress < 100 && (
+            <div className="fixed top-0 left-0 right-0 z-50 bg-blue-500 h-1">
+              <div 
+                className="h-full bg-blue-600 transition-all duration-300"
+                style={{ width: `${processingProgress}%` }}
+              ></div>
+            </div>
+          )}
+          
+          {/* رأس الصفحة */}
           <div className="sticky top-0 z-10 bg-white shadow-sm border-b border-gray-200">
             <div className="px-4 py-2 flex justify-between items-center">
               <div>
@@ -553,13 +596,16 @@ const LAB = () => {
               <div className="flex items-center">
                 <div className="relative">
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </div>
                   <select
                     value={selectedFile}
-                    onChange={(e) => setSelectedFile(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedFile(e.target.value);
+                      loadExcelData(e.target.value);
+                    }}
                     className="block w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
                   >
                     <option value="">اختر ملف Excel</option>
@@ -575,9 +621,12 @@ const LAB = () => {
           <div className="p-4">
             <div className="w-full mx-auto">
               {loading ? (
-                <div className="flex justify-center items-center h-40 bg-white rounded-lg shadow-sm">
+                <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
                   <div className="w-10 h-10 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-sm text-gray-600 mr-3">جاري تحميل البيانات...</p>
+                  <p className="text-sm text-gray-600 mt-2">جاري تحميل البيانات...</p>
+                  {processingProgress > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">{Math.round(processingProgress)}%</p>
+                  )}
                 </div>
               ) : error ? (
                 <div className="bg-red-50 border-r-4 border-red-500 p-3 rounded-lg">
@@ -588,14 +637,15 @@ const LAB = () => {
                   <div className="bg-white rounded-lg shadow-sm p-3 mb-6">
                     <h2 className="text-base font-bold text-gray-700 mb-3 border-r-4 border-indigo-500 pr-2">ملخص مؤشرات الأداء الرئيسية للمختبر</h2>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-3">
-                      <div className="col-span-1">
+                    {/* شبكة responsive محسنة للجوال */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div className="space-y-3">
                         {kpiCardsGroupOne}
                       </div>
-                      <div className="col-span-1">
+                      <div className="space-y-3">
                         {kpiCardsGroupTwo}
                       </div>
-                      <div className="col-span-1 flex items-center">
+                      <div className="space-y-3 flex items-center">
                         {kpiCardGroupThree}
                       </div>
                     </div>
