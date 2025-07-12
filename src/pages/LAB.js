@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/layout/Sidebar';
 
 // تحسين الأداء بإضافة تحميل تدريجي
-const BATCH_SIZE = 50; // حجم الدفعة لمعالجة البيانات
+const BATCH_SIZE = 50;
 
 // قاعدة URL للـ API
 const API_BASE_URL = process.env.REACT_APP_API_URL || 
@@ -26,6 +26,22 @@ const generatePlaceholderData = (count, min, max, customLabels = null) => {
       isPlaceholder: true
     }
   };
+};
+
+// دالة لقراءة الإعدادات المحفوظة - خارج component
+const getSavedKpiDefinitions = () => {
+  try {
+    const saved = localStorage.getItem('labKpiDefinitions');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length === 5) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('خطأ في قراءة الإعدادات المحفوظة:', err);
+  }
+  return null;
 };
 
 // دالة بديلة لتنسيق التاريخ بالعربية
@@ -64,7 +80,7 @@ const compareDates = (fileA, fileB) => {
   if (!dateA) return 1;
   if (!dateB) return -1;
   
-  return dateA - dateB; // ترتيب تصاعدي (من الأقدم للأحدث)
+  return dateA - dateB;
 };
 
 const LAB = () => {
@@ -78,27 +94,9 @@ const LAB = () => {
   
   // تخزين مؤقت محسن
   const dataCache = useRef(new Map());
-  const processingQueue = useRef([]);
-  
-  // إضافة مراجع للتخزين المؤقت
   const kpiCacheRef = useRef({});
   const evaluationCacheRef = useRef({});
   const excelDataRef = useRef({});
-  
-  const getSavedKpiDefinitions = useCallback(() => {
-    try {
-      const saved = localStorage.getItem('labKpiDefinitions');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length === 5) {
-          return parsed;
-        }
-      }
-    } catch (err) {
-      console.error('خطأ في قراءة الإعدادات المحفوظة:', err);
-    }
-    return null;
-  }, []);
 
   const menuItems = useMemo(() => [
     { id: 'admin', label: 'لوحة التحكم', icon: '👨‍💼', path: '/admin' },
@@ -109,7 +107,7 @@ const LAB = () => {
     { id: 'rad', label: 'قسم الأشعة', icon: '📡', path: '/rad', showForRegularUser: true },
   ], []);
 
-  const [kpiDefinitions, setKpiDefinitions] = useState(() => {
+  const [kpiDefinitions] = useState(() => {
     const savedDefinitions = getSavedKpiDefinitions();
     
     const defaultDefinitions = [
@@ -119,7 +117,7 @@ const LAB = () => {
         englishTitle: 'Percentage of Corrected Laboratory Reports',
         targetText: 'أقل من 0.5%',
         icon: (
-          <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         ),
@@ -132,7 +130,7 @@ const LAB = () => {
         englishTitle: 'Percentage of Critical Results Reported After 45 Minutes',
         targetText: 'أقل من 0.5%',
         icon: (
-          <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         ),
@@ -145,8 +143,8 @@ const LAB = () => {
         englishTitle: 'Percentage of Rejected Laboratory Samples',
         targetText: 'أقل من 2%',
         icon: (
-          <svg className="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+          <svg className="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 715.636 5.636m12.728 12.728L5.636 5.636" />
           </svg>
         ),
         borderColor: 'orange',
@@ -158,7 +156,7 @@ const LAB = () => {
         englishTitle: 'Percentage of ED Samples Processed Within 60 Minutes',
         targetText: 'أكثر من 90%',
         icon: (
-          <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         ),
@@ -171,7 +169,7 @@ const LAB = () => {
         englishTitle: 'Percentage of Routines Results Reported within 4 hours',
         targetText: 'أكثر من 95%',
         icon: (
-          <svg className="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         ),
@@ -183,26 +181,17 @@ const LAB = () => {
     if (savedDefinitions) {
       return defaultDefinitions.map((def, index) => ({
         ...def,
-        exactCell: savedDefinitions[index].exactCell || def.exactCell
+        exactCell: savedDefinitions[index]?.exactCell || def.exactCell
       }));
     }
     
     return defaultDefinitions;
   });
   
-  const defaultValues = useMemo(() => ({
-    'kpi1': '-',
-    'kpi2': '-',
-    'kpi3': '-',
-    'kpi4': '-',
-    'kpi5': '-'
-  }), []);
-  
   // تحسين أداء دالة getKpiEvaluation باستخدام التخزين المؤقت
   const getKpiEvaluation = useCallback((kpiId, value) => {
     if (!value || value === 'NA' || value === '-') return { color: '', label: '' };
     
-    // استخدام التخزين المؤقت للعمليات المتكررة
     const cacheKey = `${kpiId}-${value}`;
     if (evaluationCacheRef.current[cacheKey]) {
       return evaluationCacheRef.current[cacheKey];
@@ -247,77 +236,15 @@ const LAB = () => {
         result = { color: '', label: '' };
     }
     
-    // تخزين النتيجة للاستخدام لاحقاً
     evaluationCacheRef.current[cacheKey] = result;
     return result;
   }, []);
-  
-  // تحسين دالة استخراج القيم من الخلايا
-  const getValueByColumnName = useCallback((sheet, rowIndex, columnName) => {
-    // تحويل العمود إلى رقم للاستخدام في XLSX
-    const cellAddress = columnName + (rowIndex + 1);
-    const cell = sheet[cellAddress];
-    return cell ? cell.v : null;
-  }, []);
-
-  const formatKpiValue = useCallback((value) => {
-    if (value === null || value === undefined) {
-      return '-';
-    }
-    
-    let numValue = parseFloat(value);
-    
-    if (!isNaN(numValue)) {
-      if (numValue < 1 && numValue !== 0) {
-        return `${(numValue * 100).toFixed(1)}%`;
-      }
-      
-      if (numValue % 1 !== 0) {
-        return `${numValue.toFixed(1)}%`;
-      }
-      
-      return `${numValue}%`;
-    }
-    
-    if (typeof value === 'string') {
-      if (!value.includes('%')) {
-        return `${value}%`;
-      }
-      return value;
-    }
-    
-    return value.toString();
-  }, []);
-  
-  // تحسين دالة استخراج المؤشرات من ملف Excel
-  const findKpisInExcel = useCallback((sheet) => {
-    let extractedKpis = {};
-    
-    kpiDefinitions.forEach(kpi => {
-      extractedKpis[kpi.id] = '-';
-      
-      if (kpi.exactCell && kpi.exactCell.rowIndex !== null && kpi.exactCell.columnName) {
-        const value = getValueByColumnName(
-          sheet, 
-          kpi.exactCell.rowIndex, 
-          kpi.exactCell.columnName
-        );
-        
-        if (value !== null) {
-          extractedKpis[kpi.id] = formatKpiValue(value);
-        }
-      }
-    });
-    
-    return extractedKpis;
-  }, [kpiDefinitions, getValueByColumnName, formatKpiValue]);
   
   // تحميل قائمة الملفات
   useEffect(() => {
     let isMounted = true;
     const fetchExcelFiles = async () => {
       try {
-        // تحقق من وجود بيانات في التخزين المؤقت
         if (excelDataRef.current.filesList) {
           setExcelFiles(excelDataRef.current.filesList);
           if (excelDataRef.current.filesList.length > 0 && !selectedFile) {
@@ -336,7 +263,6 @@ const LAB = () => {
         const files = await response.json();
         const filteredFiles = files.filter(file => file.endsWith('.xlsx')).sort(compareDates);
         
-        // تخزين القائمة للاستخدام لاحقاً
         excelDataRef.current.filesList = filteredFiles;
         
         setExcelFiles(filteredFiles);
@@ -354,44 +280,10 @@ const LAB = () => {
     return () => { isMounted = false; };
   }, [selectedFile]);
 
-  // تحسين تحميل ملفات Excel
-  const loadExcelFiles = useCallback(async () => {
-    try {
-      const response = await fetch('/api/lab-files');
-      if (!response.ok) throw new Error('فشل في تحميل قائمة الملفات');
-      
-      const files = await response.json();
-      setExcelFiles(files.filter(file => file.endsWith('.xlsx')));
-    } catch (err) {
-      console.error('خطأ في تحميل الملفات:', err);
-      // استخدام ملفات افتراضية في حالة الخطأ
-      setExcelFiles([
-        'LAB-JD-GEN-4-2025-JAN-19.xlsx',
-        'LAB-JD-GEN-4-2025-JAN-20.xlsx',
-        'LAB-JD-GEN-4-2025-JAN-22.xlsx'
-      ]);
-    }
-  }, []);
-
-  // تحسين معالجة البيانات مع التحميل التدريجي
-  const processExcelDataBatch = useCallback(async (data, batchIndex, totalBatches) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const progress = ((batchIndex + 1) / totalBatches) * 100;
-        setProcessingProgress(progress);
-        
-        // معالجة دفعة البيانات
-        const processedData = data.slice(batchIndex * BATCH_SIZE, (batchIndex + 1) * BATCH_SIZE);
-        resolve(processedData);
-      }, 10); // تأخير صغير لتجنب حظر الواجهة
-    });
-  }, []);
-
-  // تحسين تحميل بيانات Excel
+  // تحميل بيانات Excel
   const loadExcelData = useCallback(async (fileName) => {
     if (!fileName) return;
     
-    // فحص التخزين المؤقت أولاً
     if (dataCache.current.has(fileName)) {
       const cachedData = dataCache.current.get(fileName);
       setKpis(cachedData);
@@ -410,25 +302,27 @@ const LAB = () => {
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       
-      // معالجة البيانات بشكل تدريجي
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
-      const totalBatches = Math.ceil(jsonData.length / BATCH_SIZE);
-      
-      let processedKpis = {};
-      
-      for (let i = 0; i < totalBatches; i++) {
-        await processExcelDataBatch(jsonData, i, totalBatches);
-        
-        // معالجة KPIs للدفعة الحالية
-        if (i === 0) { // معالجة KPIs في الدفعة الأولى فقط
-          processedKpis = extractKpisFromData(jsonData);
+      // استخراج KPIs
+      const extractedKpis = {};
+      kpiDefinitions.forEach((kpi) => {
+        try {
+          const { rowIndex, columnName } = kpi.exactCell;
+          const cellAddress = columnName + (rowIndex + 1);
+          const cell = worksheet[cellAddress];
+          
+          if (cell && cell.v !== undefined) {
+            extractedKpis[kpi.id] = cell.v;
+          } else {
+            extractedKpis[kpi.id] = '-';
+          }
+        } catch (err) {
+          console.error(`خطأ في استخراج ${kpi.id}:`, err);
+          extractedKpis[kpi.id] = '-';
         }
-      }
+      });
       
-      // حفظ في التخزين المؤقت
-      dataCache.current.set(fileName, processedKpis);
-      
-      setKpis(processedKpis);
+      dataCache.current.set(fileName, extractedKpis);
+      setKpis(extractedKpis);
       setProcessingProgress(100);
       
     } catch (err) {
@@ -438,27 +332,7 @@ const LAB = () => {
       setLoading(false);
       setTimeout(() => setProcessingProgress(0), 1000);
     }
-  }, []);
-
-  // استخراج KPIs من البيانات
-  const extractKpisFromData = useCallback((data) => {
-    const kpiValues = {};
-    
-    kpiDefinitions.forEach((kpi) => {
-      try {
-        const { rowIndex, columnName } = kpi.exactCell;
-        const columnIndex = XLSX.utils.decode_col(columnName);
-        
-        if (data[rowIndex] && data[rowIndex][columnIndex]) {
-          kpiValues[kpi.id] = data[rowIndex][columnIndex];
-        }
-      } catch (err) {
-        console.error(`خطأ في استخراج ${kpi.id}:`, err);
-      }
-    });
-    
-    return kpiValues;
-  }, []);
+  }, [kpiDefinitions]);
 
   const getSelectedFileDate = useCallback(() => {
     if (!selectedFile) return '';
@@ -475,7 +349,7 @@ const LAB = () => {
     return `${dateMatch[3]} ${months[dateMatch[2]]} ${dateMatch[1]}`;
   }, [selectedFile]);
 
-  // تحسين أداء مكون KpiCard
+  // مكون KpiCard
   const KpiCard = React.memo(({ kpi }) => {
     const { color, label } = getKpiEvaluation(kpi.id, kpis[kpi.id]);
     const isLoading = loading && !kpis[kpi.id];
@@ -519,59 +393,29 @@ const LAB = () => {
   
   KpiCard.displayName = 'KpiCard';
 
-  // تحسين أداء صفوف الجدول باستخدام useMemo
-  const tableRows = useMemo(() => {
-    return kpiDefinitions.map((kpi) => {
-      const { color, label } = getKpiEvaluation(kpi.id, kpis[kpi.id]);
-      return (
-        <tr key={kpi.id}>
-          <td className="px-6 py-4 whitespace-normal text-sm text-gray-900">
-            <div className="font-medium">{kpi.title}</div>
-            <div className="text-xs text-gray-500">{kpi.englishTitle}</div>
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-900 font-bold">
-            {kpis[kpi.id] || '-'}
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
-            {kpi.targetText}
-          </td>
-          <td className="px-6 py-4 whitespace-nowrap text-center">
-            <span 
-              className="px-2 py-1 text-xs font-medium rounded-full" 
-              style={{ backgroundColor: color, color: 'white' }}
-            >
-              {label}
-            </span>
-          </td>
-        </tr>
-      );
-    });
-  }, [kpiDefinitions, kpis, getKpiEvaluation]);
-
-  // تحسين أداء بطاقات KPI باستخدام useMemo
+  // بطاقات KPI محسنة
   const kpiCardsGroupOne = useMemo(() => {
     return kpiDefinitions.slice(0, 2).map((kpi) => (
       <KpiCard key={kpi.id} kpi={kpi} />
     ));
-  }, [kpiDefinitions, kpis]);
+  }, [kpiDefinitions, kpis, getKpiEvaluation]);
 
   const kpiCardsGroupTwo = useMemo(() => {
     return kpiDefinitions.slice(2, 4).map((kpi) => (
       <KpiCard key={kpi.id} kpi={kpi} />
     ));
-  }, [kpiDefinitions, kpis]);
+  }, [kpiDefinitions, kpis, getKpiEvaluation]);
 
   const kpiCardGroupThree = useMemo(() => {
     return kpiDefinitions[4] ? <KpiCard key={kpiDefinitions[4].id} kpi={kpiDefinitions[4]} /> : null;
-  }, [kpiDefinitions, kpis]);
+  }, [kpiDefinitions, kpis, getKpiEvaluation]);
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
       <div className="flex h-screen">
         <Sidebar />
 
-        <div className="flex-1 overflow-auto bg-gray-50 mr-72">
-          {/* شريط التقدم */}
+        <div className="flex-1 overflow-auto bg-gray-50 mr-0 lg:mr-72">
           {processingProgress > 0 && processingProgress < 100 && (
             <div className="fixed top-0 left-0 right-0 z-50 bg-blue-500 h-1">
               <div 
@@ -581,11 +425,10 @@ const LAB = () => {
             </div>
           )}
           
-          {/* رأس الصفحة */}
           <div className="sticky top-0 z-10 bg-white shadow-sm border-b border-gray-200">
-            <div className="px-4 py-2 flex justify-between items-center">
+            <div className="px-2 sm:px-4 py-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <div>
-                <h1 className="text-xl font-bold text-gray-800">لوحة تحكم بيانات المختبر</h1>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-800">لوحة تحكم بيانات المختبر</h1>
                 {selectedFile && (
                   <div className="text-xs text-gray-500 mt-0.5">
                     {getSelectedFileDate() ? `بيانات ${getSelectedFileDate()}` : selectedFile}
@@ -593,20 +436,15 @@ const LAB = () => {
                 )}
               </div>
               
-              <div className="flex items-center">
-                <div className="relative">
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
+              <div className="flex items-center w-full sm:w-auto">
+                <div className="relative flex-1 sm:flex-none">
                   <select
                     value={selectedFile}
                     onChange={(e) => {
                       setSelectedFile(e.target.value);
                       loadExcelData(e.target.value);
                     }}
-                    className="block w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
+                    className="block w-full sm:w-56 bg-white border border-gray-300 rounded-lg py-1.5 pr-10 pl-3 text-sm text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     <option value="">اختر ملف Excel</option>
                     {excelFiles.map((file, index) => (
@@ -618,7 +456,7 @@ const LAB = () => {
             </div>
           </div>
           
-          <div className="p-4">
+          <div className="p-2 sm:p-4">
             <div className="w-full mx-auto">
               {loading ? (
                 <div className="flex flex-col justify-center items-center h-40 bg-white rounded-lg shadow-sm">
@@ -637,7 +475,6 @@ const LAB = () => {
                   <div className="bg-white rounded-lg shadow-sm p-3 mb-6">
                     <h2 className="text-base font-bold text-gray-700 mb-3 border-r-4 border-indigo-500 pr-2">ملخص مؤشرات الأداء الرئيسية للمختبر</h2>
                     
-                    {/* شبكة responsive محسنة للجوال */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       <div className="space-y-3">
                         {kpiCardsGroupOne}
